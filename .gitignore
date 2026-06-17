@@ -3,8 +3,17 @@
 sales_data.csv
 raw_sales_data.csv
 
-# 環境ごとの設定ファイル
+# ローカル環境で作るものはGitHubに送らない
 venv/
 db.sqlite3
+*.sqlite3
+
+# Python/Djangoの生成物
 __pycache__/
+*.py[cod]
+
+# OSやエディタの生成物
 .DS_Store
+
+# ローカルバックアップ
+*_backup_*/

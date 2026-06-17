@@ -20,3 +20,6 @@ df = df[['日付', '得意先コード', '得意先名', '商品コード', '商
 # 6. 保存
 df.to_csv('cleaned_sales_data.csv', index=False, encoding='utf-8-sig')
 print("加工完了！cleaned_sales_data.csv ができました。")
+
+print("--- データ処理完了 ---")
+print("最も先の受注日:", df['日付'].max())  # デバッグ用に先頭5行を表示

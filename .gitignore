@@ -1,0 +1,10 @@
+# 巨大なデータファイルはGitHubに送らない
+*.csv
+sales_data.csv
+raw_sales_data.csv
+
+# 環境ごとの設定ファイル
+venv/
+db.sqlite3
+__pycache__/
+.DS_Store

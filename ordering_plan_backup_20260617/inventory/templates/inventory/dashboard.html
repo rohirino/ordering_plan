@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>発注計画計画ダッシュボード</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        html, body { margin: 0; padding: 0; height: 100%; font-family: sans-serif; background-color: #fcfcfc; overflow: hidden; }
+        body { padding: 20px; display: flex; flex-direction: column; box-sizing: border-box; }
+        .fixed-header-area { flex-shrink: 0; margin-bottom: 12px; }
+        .scroll-container { flex: 1; overflow: auto; border: 1px solid #ccc; background-color: white; position: relative; }
+        .data-table { border-collapse: separate; border-spacing: 0; text-align: left; border-top: 1px solid #ddd; border-left: 1px solid #ddd; }
+        .data-table th, .data-table td { border-right: 1px solid #ddd; border-bottom: 1px solid #ddd; padding: 6px; }
+        thead { position: sticky; top: 0; z-index: 10; }
+        thead th { background-color: #f2f2f2; }
+        .sticky-col { position: sticky; left: 0; background-color: #f9f9f9; z-index: 2; }
+        tr:hover .sticky-col { background-color: #f1f1f1; }
+        thead th.sticky-col { z-index: 11; background-color: #f2f2f2; }
+        .num-cell { text-align: right; }
+        .timeline-cell { text-align: center; padding: 4px; font-size: 11px; min-width: 70px; }
+        .detail-sub { font-size: 9px; color: gray; display: block; margin-top: 1px; line-height: 1.1; }
+        .ship-text { color: #dc3545; } .arr-text { color: #28a745; font-weight: bold; } .arr-ko-text { color: #17a2b8; } 
+        .trend-badge { display: inline-block; padding: 2px 4px; border-radius: 4px; font-size: 10px; margin-top: 2px; }
+        .wh-breakdown { font-size: 10px; color: #555; font-weight: normal; margin-top: 4px; border-top: 1px dashed #eee; padding-top: 3px; line-height: 1.3; text-align: left; }
+        .transit-badge { color: #ff8c00; font-weight: bold; } 
+        .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.4); }
+        .modal-content { background-color: white; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 75%; max-width: 1000px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .close-btn { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close-btn:hover { color: black; }
+        .graph-btn { background-color: #17a2b8; color: white; border: none; padding: 3px 0; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 12px; height: 24px; width: 100%; }
+        .toggle-trigger-btn { width: 100%; text-align: left; background-color: #ffffff; border: 1px solid #ced4da; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05); margin-bottom: 4px; }
+        .toggle-trigger-btn:hover { background-color: #f1f3f5; }
+        .order-table, .arrival-edit-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        .order-table th, .order-table td, .arrival-edit-table th, .arrival-edit-table td { padding: 5px 8px; border: 1px solid #dee2e6; text-align: left; }
+        .order-table th, .arrival-edit-table th { background-color: #e9ecef; font-weight: bold; }
+        .status-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 10px; }
+        .inline-input { padding: 2px 4px; font-size: 11px; border: 1px solid #ced4da; border-radius: 3px; font-weight: bold; }
+        .page-btn { padding: 4px 10px; border: 1px solid #ced4da; background: white; text-decoration: none; color: #495057; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: pointer; }
+        .rank-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 12px; font-weight: bold; color: white; }
+        .company-tab-box { display: flex; gap: 4px; margin-bottom: 8px; border-bottom: 2px solid #dee2e6; padding-bottom: 1px; }
+        .company-tab { padding: 6px 20px; border: 1px solid #ced4da; border-bottom: none; background-color: #e9ecef; color: #495057; text-decoration: none; font-size: 13px; font-weight: bold; border-top-left-radius: 4px; border-top-right-radius: 4px; }
+        .company-tab.active { background-color: #0056b3; color: white; border-color: #0056b3; }
+    </style>
+</head>
+<body>
+
+    <div class="fixed-header-area">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <h1 style="margin: 0; font-size: 22px;">在庫・発注計画計画ダッシュボード</h1>
+            <div style="display: flex; gap: 10px;">
+                <a href="{% url 'about_app' %}?current_company={{ current_company }}" style="background-color: #6c757d; color: white; text-decoration: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; font-size: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 5px;">📖 このアプリについて</a>
+                <a href="{% url 'operation_guide' %}" target="_blank" style="background-color: #17a2b8; color: white; text-decoration: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; font-size: 12px; display: flex; align-items: center; gap: 5px;">📋 画面説明・運用ガイド (別タブ)</a>
+                <a href="/admin/" target="_blank" style="background-color: #28a745; color: white; text-decoration: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; font-size: 12px; display: flex; align-items: center; gap: 5px;">⚙️ Django管理画面 (別タブ)</a>
+            </div>
+        </div>
+
+        <div class="company-tab-box">
+            <a href="?current_company=IKUJI" class="company-tab {% if current_company == 'IKUJI' %}active{% endif %}">🏢 日本育児 の管轄画面</a>
+            <a href="?current_company=SELECT" class="company-tab {% if current_company == 'SELECT' %}active{% endif %}">🐶 ペットセレクト の管轄画面</a>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-bottom: 6px;">
+            <div style="background-color: #fff5f5; border: 1px solid #ffc9c9; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #e03131;">🚨 会社全体の欠品リスク：{{ kpi_shortage_cnt }} 品番</div>
+            <div style="background-color: #fff9e6; border: 1px solid #ffeeba; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #b58100;">⚠️ 会社全体の発注点割れ：{{ kpi_order_point_cnt }} 品番</div>
+            <form action="{% url 'recalculate_abc_ranks' %}" method="POST" style="margin: 0;">
+                {% csrf_token %}
+                <input type="hidden" name="current_company" value="{{ current_company }}">
+                <button type="submit" style="background-color: #495057; color: white; border: none; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: pointer;">ABC再計算</button>
+            </form>
+        </div>
+        
+        {% if messages %}
+            <div style="margin-bottom: 4px;">
+                {% for message in messages %}
+                    <div style="padding: 4px 10px; border-radius: 4px; font-weight: bold; margin-bottom: 2px; font-size: 12px; display: flex; justify-content: space-between; align-items: center;
+                        {% if message.tags == 'success' %} background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb;
+                        {% elif message.tags == 'info' %} background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb;
+                        {% else %} background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; {% endif %}">
+                        
+                        <span>{{ message.message }}</span>
+                        
+                        <span onclick="this.parentElement.remove()" style="cursor: pointer; font-size: 14px; margin-left: 10px; padding: 0 4px; font-weight: bold; opacity: 0.5; transition: opacity 0.1s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.5">×</span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <form method="GET" style="margin-bottom: 4px; background-color: #f1f3f5; padding: 6px 12px; border-radius: 6px; border: 1px solid #dee2e6;">
+            <input type="hidden" name="current_company" value="{{ current_company }}">
+            <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+                <div style="font-size: 12px; color: #495057;"><span style="font-weight: bold; color: #212529;">👁️ 表示対象：</span>
+                    <select name="active_filter" class="inline-input" style="padding: 2px 6px; border-radius: 4px; background: white;" onchange="this.form.submit();">
+                        <option value="active" {% if active_filter == 'active' %}selected{% endif %}>稼働商品のみ</option>
+                        <option value="all" {% if active_filter == 'all' %}selected{% endif %}>登録マスタ全件</option>
+                    </select>
+                </div>
+                <div style="font-size: 12px; color: #495057;"><span style="font-weight: bold; color: #212529;">🔍 検索：</span>
+                    <input type="text" name="search_query" value="{{ search_query }}" placeholder="コード・品名..." style="width: 110px; padding: 2px 4px; border-radius: 4px; border: 1px solid #ced4da; font-size: 11px;">
+                </div>
+                <div style="font-size: 12px; color: #495057;"><span style="font-weight: bold; color: #212529;">頭3桁：</span>
+                    <input type="text" name="supplier_code" value="{{ supplier_code }}" placeholder="004" maxlength="3" style="width: 32px; padding: 2px 4px; border-radius: 4px; border: 1px solid #ced4da; font-size: 11px; text-align: center; font-weight: bold;">
+                </div>
+                <div style="font-size: 12px; color: #495057;"><span style="font-weight: bold; color: #212529;">📊 クラス：</span>
+                    <select name="abc_filter" class="inline-input" style="padding: 2px 6px; border-radius: 4px; background: white;" onchange="this.form.submit();">
+                        <option value="">全てのクラス</option>
+                        <option value="A" {% if abc_filter == 'A' %}selected{% endif %}>Aクラス（主力）</option>
+                        <option value="B" {% if abc_filter == 'B' %}selected{% endif %}>Bクラス（中堅）</option>
+                        <option value="C" {% if abc_filter == 'C' %}selected{% endif %}>Cクラス（低動態）</option>
+                        <option value="DEAD" {% if abc_filter == 'DEAD' %}selected{% endif %}>🪵 処分推奨品</option>
+                    </select>
+                </div>
+                <div style="font-size: 12px; color: #495057;"><span style="font-weight: bold; color: #212529;">📅 動態：</span>
+                    過去 <input type="number" name="active_months" value="{{ active_months }}" style="width: 32px; padding: 1px; text-align: center; font-weight: bold; border-radius: 4px; border: 1px solid #ced4da;" min="1"> ヶ月
+                </div>
+                {% if current_company == 'SELECT' %}
+                <div style="font-size: 12px; color: #495057; background-color: #eaf4ff; padding: 3px 8px; border-radius: 4px; display: flex; align-items: center; gap: 8px; border: 1px solid #b8daff;">
+                    <span style="font-weight: bold; color: #004085;">🤝 日本育児在庫の加算：</span>
+                    {% for wh in ikuji_warehouses %}
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 2px; font-weight: bold; color: #495057;"><input type="checkbox" name="shared_whs" value="{{ wh.id }}" {% if wh.id in shared_wh_ids %}checked{% endif %} onchange="this.form.submit();"> {{ wh.name }}</label>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                <div>
+                    <button type="submit" style="background-color: #495057; color: white; border: none; padding: 3px 10px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 11px;">実行</button>
+                    {% if search_query or supplier_code or abc_filter or active_months != '12' or active_filter != 'active' or shared_wh_ids %}
+                        <a href="/?current_company={{ current_company }}" style="margin-left: 8px; font-size: 11px; color: #6c757d; text-decoration: none; font-weight: bold;">✕ クリア</a>
+                    {% endif %}
+                </div>
+            </div>
+        </form>
+
+        <button type="button" onclick="toggleSimPanel()" class="toggle-trigger-btn" style="background-color: #e2fbe8; border-color: #bbf2c4; margin-bottom: 4px;">
+            <span id="simToggleTitle" style="display: flex; align-items: center; gap: 6px; color: #1e7e34;">🔬 需要予測＆在庫ロジック 検証シミュレーター（社内教育・動的検証環境）</span>
+            <span id="simToggleIcon" style="font-size: 12px; color: #1e7e34;">[ クリックで展開 ＋ ]</span>
+        </button>
+            <div id="simFoldPanel" style="display: none; background-color: #ffffff; padding: 10px; border-radius: 6px; border: 1px solid #bbf2c4; margin-bottom: 4px;">
+                <div style="display: flex; gap: 20px; align-items: flex-start;">
+                    <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; width: 260px; background-color: #f8f9fa; padding: 8px; border-radius: 4px; border: 1px solid #dee2e6;">
+                        <div style="font-weight: bold; border-bottom: 1px solid #ccc; padding-bottom: 2px;">🎛️ シミュレーションパラメータ</div>
+                        <label>現在庫数: <input type="number" id="sim_stock" value="150" style="width: 50px; text-align: center;" oninput="runLogicSimulator()"></label>
+                        <label>1日需要(平均): <input type="number" id="sim_demand" value="5" style="width: 45px; text-align: center;" oninput="runLogicSimulator()"></label>
+                        <label>需要の波(ブレ): <select id="sim_wave" onchange="runLogicSimulator()"><option value="none">なし (安定)</option><option value="small">小 (通常変動)</option><option value="large">大 (急激な波)</option></select></label>
+                        <label>リードタイム(LT): <input type="number" id="sim_lt" value="30" style="width: 45px; text-align: center;" oninput="runLogicSimulator()"> 日</label>
+                        <label>安全在庫: <input type="number" id="sim_safety" value="30" style="width: 45px; text-align: center;" oninput="runLogicSimulator()"> 個</label>
+                        <div style="margin-top: 4px; padding: 4px; background: #e6f4ea; border-radius: 4px; border: 1px solid #c3e6cb; font-weight: bold; font-size: 12px; text-align: center;">
+                            🎯 算出発注点: <span id="sim_op_val" style="color: #0056b3;">180</span> 個
+                        </div>
+                        <div id="sim_alert_status" style="font-weight: bold; text-align: center; padding: 2px; border-radius: 4px; margin-bottom: 4px;"></div>
+                        
+                        <div style="border-top: 1px dashed #ccc; padding-top: 4px; display: flex; align-items: center; justify-content: space-between;">
+                            <span style="font-weight: bold; color:#6c757d;">🖥️ グラフ表示サイズ:</span>
+                            <div style="display: flex; gap: 2px;">
+                                <button type="button" onclick="resizeSimChart('180px')" style="padding: 2px 6px; font-size: 10px; cursor: pointer; background: white; border: 1px solid #ced4da; border-radius: 3px;">小</button>
+                                <button type="button" onclick="resizeSimChart('400px')" style="padding: 2px 6px; font-size: 10px; cursor: pointer; background: white; border: 1px solid #ced4da; border-radius: 3px;">中</button>
+                                <button type="button" onclick="resizeSimChart('650px')" style="padding: 2px 6px; font-size: 10px; cursor: pointer; background: #28a745; color: white; border: 1px solid #28a745; border-radius: 3px; font-weight: bold;">大 🔍</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="simChartContainer" style="flex: 1; height: 180px; position: relative;"><canvas id="simChart"></canvas></div>
+                </div>
+            </div>
+
+        <button type="button" onclick="toggleOrderPanel()" class="toggle-trigger-btn" style="background-color: #eaf4ff; border-color: #b8daff;">
+            <span id="orderToggleTitle" style="display: flex; align-items: center; gap: 6px; color: #004085;">📦 生成された発注計画の一覧・処理管理 (現在 {{ active_orders|length }} 件)</span>
+            <span id="orderToggleIcon" style="font-size: 12px; color: #004085;">[ クリックで収納 － ]</span>
+        </button>
+        <div id="orderFoldPanel" style="display: block; max-height: 90px; overflow-y: auto; background-color: #ffffff; padding: 6px; border-radius: 6px; border: 1px solid #b8daff; margin-bottom: 4px;">
+
+            <div style="text-align: right; margin-bottom: 4px;">
+                <button type="button" onclick="printOrderPlanSheet()" style="background-color: #495057; color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;">🖨️ この一覧をA4印刷（アクションボタン除外）</button>
+            </div>
+
+            <table class="order-table">
+                <thead><tr><th>作成日時</th><th>商品コード</th><th>商品名</th><th style="text-align: right;">発注指示数量</th><th>ステータス</th><th style="text-align: center;">アクション</th></tr></thead>
+                <tbody>
+                    {% for order in active_orders %}
+                    <tr>
+                        <td style="color: #6c757d;">{{ order.created_at|date:"m/d H:i" }}</td><td style="font-weight: bold;">{{ order.product.code }}</td><td>{{ order.product.name }}</td><td style="text-align: right; font-weight: bold; color: #dc3545;">{{ order.quantity }} 個</td>
+                        <td>{% if order.status == '計画中' %}<span class="status-badge" style="background-color: #ffeeba; color: #856404;">📋 計画中</span>{% elif order.status == '発注済' %}<span class="status-badge" style="background-color: #cce5ff; color: #004085;">✉️ 発注済</span>{% else %}<span class="status-badge" style="background-color: #d4edda; color: #155724;">✅ 入庫済</span>{% endif %}</td>
+                        <td style="text-align: center;"><div style="display: flex; gap: 5px; justify-content: center;">
+                                {% if order.status == '計画中' %}<form action="{% url 'update_order_status' order.id %}" method="POST" style="margin:0;">{% csrf_token %}<input type="hidden" name="status" value="発注済"><button type="submit" style="background-color: #007bff; color:white; border:none; padding:2px 5px; border-radius:3px; font-size:9px; font-weight:bold; cursor:pointer;">➔ 発注済にする</button></form>
+                                {% elif order.status == '発注済' %}<form action="{% url 'update_order_status' order.id %}" method="POST" style="margin:0;">{% csrf_token %}<input type="hidden" name="status" value="入庫済"><button type="submit" style="background-color: #28a745; color:white; border:none; padding:2px 5px; border-radius:3px; font-size:9px; font-weight:bold; cursor:pointer;">➔ 入庫完了</button></form>{% endif %}
+                                <form action="{% url 'delete_order_plan' order.id %}" method="POST" style="margin:0;" onsubmit="return confirm('計画を取り消しますか？');">{% csrf_token %}<button type="submit" style="background-color: #dc3545; color:white; border:none; padding:2px 5px; border-radius:3px; font-size:9px; font-weight:bold; cursor:pointer;">✕ 取消</button></form>
+                            </div></td>
+                    </tr>
+                    {% empty %}<tr><td colspan="6" style="text-align: center; color: gray; padding: 6px;">現在作成された計画はありません。</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <button type="button" onclick="toggleArrivalPanel()" class="toggle-trigger-btn" style="background-color: #fff3cd; border-color: #ffeeba;">
+            <span id="arrivalToggleTitle" style="display: flex; align-items: center; gap: 6px; color: #856404;">📅 登録済みの入荷予定（発注残）の個別修正変更 (現在 {{ active_arrivals|length }} 件)</span>
+            <span id="arrivalToggleIcon" style="font-size: 12px; color: #856404;">[ クリックで展開 ＋ ]</span>
+        </button>
+        <div id="arrivalFoldPanel" style="display: none; max-height: 100px; overflow-y: auto; background-color: #ffffff; padding: 6px; border-radius: 6px; border: 1px solid #ffeeba; margin-bottom: 4px;">
+            <table class="arrival-edit-table">
+                <thead><tr><th>商品</th><th>入荷予定日</th><th style="text-align: right;">予定数量</th><th>確度ステータス</th><th style="text-align: center;">アクション</th></tr></thead>
+                <tbody>
+                    {% for arr in active_arrivals %}
+                    <tr>
+                        <td><b style="color:#004085;">[{{ arr.product.code }}]</b> {{ arr.product.name }}</td>
+                        <form action="{% url 'update_arrival_schedule' arr.id %}" method="POST" style="margin:0;">{% csrf_token %}
+                            <td><input type="date" name="arrival_date" value="{{ arr.arrival_date|date:'Y-m-d' }}" class="inline-input" style="width: 110px;"></td>
+                            <td style="text-align: right;"><input type="number" name="quantity" value="{{ arr.quantity }}" class="inline-input" style="width: 50px; text-align: right;" min="0"> 個</td>
+                            <td><select name="status" class="inline-input"><option value="確定" {% if arr.status == '確定' %}selected{% endif %}>確定</option><option value="高確度" {% if arr.status == '高確度' %}selected{% endif %}>高確度</option><option value="希望" {% if arr.status == '希望' %}selected{% endif %}>希望</option></select></td>
+                            <td style="text-align: center;"><button type="submit" style="background-color: #e0a800; color:#212529; border:none; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold; cursor:pointer;">💾 修正保存</button></form>
+                                <form action="{% url 'delete_arrival_schedule' arr.id %}" method="POST" style="display:inline; margin:0;" onsubmit="return confirm('入荷予定を削除しますか？');">{% csrf_token %}<button type="submit" style="background-color: #dc3545; color:white; border:none; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold; cursor:pointer; margin-left: 5px;">✕ 削除</button></form></td>
+                    </tr>
+                    {% empty %}<tr><td colspan="5" style="text-align: center; color: gray; padding: 6px;">現在登録されている入荷予定はありません。</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <button type="button" onclick="toggleCsvPanel()" class="toggle-trigger-btn">
+            <span id="csvToggleTitle" style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #495057;">各種CSVデータのインポート登録・一括出力・雛形DLを表示する</span>
+        </button>
+        <div id="csvFoldPanel" style="display: none; background-color: #ffffff; padding: 8px; border-radius: 6px; border: 1px solid #ced4da; margin-bottom: 4px;">
+            <div style="display: flex; flex-wrap: wrap; gap: 12px;">
+                <form action="{% url 'import_products_csv' %}" method="POST" enctype="multipart/form-data" style="display: flex; flex-direction: column; gap: 2px; border-right: 1px solid #dee2e6; padding-right: 12px;">
+                    {% csrf_token %}<input type="hidden" name="current_company" value="{{ current_company }}">
+                    <div style="display: flex; gap: 6px; font-size: 11px; font-weight: bold; align-items: center;"><span style="color: #495057;">① 商品マスタ登録</span><a href="{% url 'download_csv_template' 'products' %}?current_company={{ current_company }}" style="color: #007bff; text-decoration: none;">[雛形]</a><a href="{% url 'export_products_csv' %}?current_company={{ current_company }}" style="color: #28a745; text-decoration: none;">[📤 出力]</a></div>
+                    <div style="display: flex; align-items: center; gap: 4px;"><input type="file" name="csv_file" accept=".csv" required style="font-size: 11px; width: 140px;"><button type="submit" style="background-color: #6c757d; color: white; border: none; padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; cursor: pointer;">登録</button></div>
+                </form>
+                <form action="{% url 'import_inventory_csv' %}" method="POST" enctype="multipart/form-data" style="display: flex; flex-direction: column; gap: 2px; border-right: 1px solid #dee2e6; padding-right: 12px;">
+                    {% csrf_token %}<input type="hidden" name="current_company" value="{{ current_company }}">
+                    <div style="display: flex; gap: 6px; font-size: 11px; font-weight: bold; align-items: center;"><span style="color: #495057;">② 〇〇月末棚卸し在庫更新</span><a href="{% url 'download_csv_template' 'inventory' %}?current_company={{ current_company }}" style="color: #007bff; text-decoration: none;">[雛形]</a><a href="{% url 'export_inventory_csv' %}?current_company={{ current_company }}" style="color: #28a745; text-decoration: none;">[📤 出力]</a></div>
+                    <div style="display: flex; align-items: center; gap: 4px;"><select name="inventory_date" style="font-size: 11px; padding: 1px; border-radius: 4px; border: 1px solid #ced4da;">{% for choice in inventory_date_choices %}<option value="{{ choice.value }}" {% if forloop.first %}selected{% endif %}>{{ choice.display }}</option>{% endfor %}</select><input type="file" name="csv_file" accept=".csv" required style="font-size: 11px; width: 140px;"><button type="submit" style="background-color: #28a745; color: white; border: none; padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; cursor: pointer;">更新</button></div>
+                </form>
+                <form action="{% url 'import_sales_csv' %}" method="POST" enctype="multipart/form-data" style="display: flex; flex-direction: column; gap: 2px; border-right: 1px solid #dee2e6; padding-right: 12px;">
+                    {% csrf_token %}<input type="hidden" name="current_company" value="{{ current_company }}">
+                    <div style="display: flex; gap: 6px; font-size: 11px; font-weight: bold; align-items: center;"><span style="color: #495057;">③ 日次販売履歴追加</span><a href="{% url 'download_csv_template' 'sales' %}?current_company={{ current_company }}" style="color: #007bff; text-decoration: none;">[雛形]</a><a href="{% url 'export_sales_csv' %}?current_company={{ current_company }}" style="color: #28a745; text-decoration: none;">[📤 出力]</a></div>
+                    <div style="display: flex; align-items: center; gap: 4px;"><input type="file" name="csv_file" accept=".csv" required style="font-size: 11px; width: 140px;"><button type="submit" style="background-color: #007bff; color: white; border: none; padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; cursor: pointer;">追加</button></div>
+                </form>
+                <form action="{% url 'import_arrivals_csv' %}" method="POST" enctype="multipart/form-data" style="display: flex; flex-direction: column; gap: 2px; border-right: 1px solid #dee2e6; padding-right: 12px;">
+                    {% csrf_token %}<input type="hidden" name="current_company" value="{{ current_company }}">
+                    <div style="display: flex; gap: 6px; font-size: 11px; font-weight: bold; align-items: center;"><span style="color: #495057;">④ 入荷予定・発注残</span><a href="{% url 'download_csv_template' 'arrivals' %}?current_company={{ current_company }}" style="color: #007bff; text-decoration: none;">[雛形]</a><a href="{% url 'export_arrivals_csv' %}?current_company={{ current_company }}" style="color: #28a745; text-decoration: none;">[📤 出力]</a></div>
+                    <div style="display: flex; align-items: center; gap: 4px;"><input type="file" name="csv_file" accept=".csv" required style="font-size: 11px; width: 140px;"><button type="submit" style="background-color: #e0a800; color: #212529; border: none; padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; cursor: pointer;">洗替</button></div>
+                </form>
+                <form action="{% url 'delete_sales_history_period' %}" method="POST" style="display: flex; flex-direction: column; gap: 2px;" onsubmit="return confirm('販売履歴を消去しますか？');">
+                    {% csrf_token %}<input type="hidden" name="current_company" value="{{ current_company }}"><div style="font-size: 11px; font-weight: bold; color: #dc3545;">⑤ 販売履歴の期間削除</div>
+                    <div style="display: flex; align-items: center; gap: 4px; font-size: 11px;"><input type="date" name="start_date" required style="font-size: 10px; padding: 1px;"> ～ <input type="date" name="end_date" required style="font-size: 10px; padding: 1px;"><button type="submit" style="background-color: #dc3545; color: white; border: none; padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; cursor: pointer;">一括削除</button></div>
+                </form>
+            </div>
+            <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; font-size: 11px; align-items: center; max-width: 100%;"><span style="color: #6c757d; font-weight: bold;">登録済みの倉庫(✕で消去):</span>
+                {% for wh in all_warehouses %}
+                    <form action="{% url 'delete_warehouse' wh.id %}" method="POST" style="display: inline; margin: 0;" onsubmit="return confirm('倉庫を完全削除しますか？');">{% csrf_token %}<input type="hidden" name="current_company" value="{{ current_company }}"><button type="submit" style="background-color: #f8f9fa; color: #495057; border: 1px solid #ced4da; padding: 1px 5px; border-radius: 3px; cursor: pointer; font-size: 11px; display: inline-flex; align-items: center; gap: 3px;">{{ wh.name }} <span style="color: #dc3545; font-weight: bold;">×</span></button></form>
+                {% endfor %}
+            </div>
+        </div>
+
+        <form id="bulkOrderForm" method="POST" action="{% url 'bulk_create_order_plan' %}" style="margin: 0;">
+            {% csrf_token %}<input type="hidden" name="current_company" value="{{ current_company }}">
+            <div style="margin: 2px 0 0 0; display: flex; align-items: center; gap: 12px; background: #fff5f5; border: 1px dashed #ffc9c9; padding: 4px 10px; border-radius: 4px;">
+                <button type="submit" style="background-color: #dc3545; color: white; border: none; padding: 4px 14px; border-radius: 4px; font-weight: bold; font-size: 12px; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">📦 選択したチェック品番を一括で自動計算発注に投入する</button>
+                <label style="font-size: 12px; color: #e03131; font-weight: bold; cursor: pointer; user-select: none;"><input type="checkbox" id="selectAllItems" onchange="toggleSelectAll(this)" style="cursor: pointer;"> ページ内の全品番を選択 / 解除</label>
+            </div>
+        </form>
+    </div>
+
+    <div class="scroll-container">
+        <table class="data-table">
+<!-- 💡修正①：ここからヘッダーの差し替え -->
+            <thead>
+                <tr>
+                    <th style="padding: 10px; text-align: center; width: 35px;" rowspan="2" class="sticky-col">選択</th>
+                    <th style="padding: 10px; min-width: 250px;" rowspan="2" class="sticky-col">商品コード / 商品名 / ★マスタ直接変更</th>
+                    <th style="padding: 10px; min-width: 155px;" rowspan="2">現在庫数(合算) / <br><span style="color:#0056b3;">発注点(理論値)</span></th>
+                    <th style="padding: 10px; color: #0056b3; background-color: #e6f0ff; text-align: center;" colspan="3">過去実績（月換算ベース）</th>
+                    
+                    <!-- ★「勢い」と「状況」を1行目のthに統合（ピンク背景） -->
+                    <th style="padding: 6px; background-color: #ffe6f0; text-align: center; font-size: 13px; font-weight: bold; min-width: 140px;">
+                        勢い(トレンド倍率)<br>状況
+                    </th>
+                    
+                    <th style="padding: 10px; background-color: #fff3cd; text-align: center;" colspan="120">在庫予測推移タイムライン（未来120日間）</th>
+                </tr>
+                <tr>
+                    <th style="padding: 6px; font-size: 12px; background-color: #0056b3; color: white; min-width: 60px;">長期ベース</th>
+                    <th style="padding: 6px; font-size: 12px; background-color: #fafdff; min-width: 60px;">直近60日</th>
+                    <th style="padding: 6px; font-size: 12px; background-color: #fafdff; min-width: 60px;">直近30日</th>
+                    
+                    <!-- ★「対応」を2行目のthとして真下に潜り込ませる（グレー背景） -->
+                    <th style="padding: 6px; font-size: 12px; background-color: #cccccc; text-align: center; font-weight: bold; color: #111;">対応</th>
+                    
+                    {% for d in date_list %}<th style="padding: 4px; font-size: 10px; text-align: center; background-color: #fff9e6; min-width: 70px;">{{ d|date:"m/d" }}</th>{% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in inventories %}
+                <tr {% if item.product.abc_rank == 'DEAD' %}style="background-color: #f6f0ff;"{% elif item.status_alert == "🚨 欠品リスク" or item.status_alert == "🚨 欠品リスク(処分許可)" %}style="background-color: #ffe6e6;"{% elif item.status_alert == "⚠️ 発注点割れ" or item.status_alert == "⚠️ 発注点割れ(処分許可)" %}style="background-color: #fff3cd;"{% endif %}>
+                    
+                    <td style="text-align: center;" class="sticky-col"><input type="checkbox" name="selected_products" value="{{ item.product.id }}" form="bulkOrderForm" class="item-checkbox" style="cursor: pointer; transform: scale(1.1);"></td>
+
+                    <td style="padding: 6px; font-weight: bold; line-height: 1.4; vertical-align: top;" class="sticky-col">
+                        <div style="font-size: 12px; color: #6c757d; font-weight: normal; margin-bottom: 2px;">コード: {{ item.product.code }}</div>
+                        <div style="color: #212529; font-size: 12px; font-weight: 600; margin-bottom: 4px; line-height: 1.3; height: 32px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{{ item.product.name }}</div>
+                        <div style="margin-bottom: 4px;">
+                            {% if item.product.abc_rank == 'A' %}<span class="rank-badge" style="background-color: #007bff;">📊 Aクラス (主力売上)</span>
+                            {% elif item.product.abc_rank == 'B' %}<span class="rank-badge" style="background-color: #28a745;">📈 Bクラス (普通定番)</span>
+                            {% elif item.product.abc_rank == 'C' %}<span class="rank-badge" style="background-color: #6c757d;">📉 Cクラス (低動態品)</span>
+                            {% elif item.product.abc_rank == 'DEAD' %}<span class="rank-badge" style="background-color: #6f42c1; border: 1px solid #563d7c;">🪵 処分推奨 (半年売上0)</span>{% endif %}
+                        </div>
+                        
+                        <form method="POST" action="{% url 'update_product_config' item.product.id %}" style="padding: 6px; background-color: #ffffff; border: 1px solid #dee2e6; border-radius: 6px; margin: 4px 0 0 0; font-weight: normal;">
+                            {% csrf_token %}
+                            <div style="margin-bottom: 5px; display: grid; grid-template-columns: 80px 1fr; gap: 4px 6px; align-items: center; background-color: #f8f9fa; padding: 4px 6px; border-radius: 4px; border: 1px solid #dee2e6;">
+                                <span style="font-size: 12px; color: #495057;">⏱️ LT:</span>
+                                <div style="display: flex; align-items: center; gap: 3px;"><input type="number" name="lead_time" value="{{ item.product.lead_time }}" style="width: 48px !important; padding: 1px 4px; text-align: center; border: 1px solid #ced4da; border-radius: 4px; font-size: 12px; height: 20px; background: white;" min="0"><span style="font-size: 12px; color: #6c757d;">日</span></div>
+                                <span style="font-size: 12px; color: #495057;">📦 ロット:</span>
+                                <div><input type="number" name="order_lot" value="{{ item.product.order_lot }}" style="width: 48px !important; padding: 1px 4px; text-align: center; border: 1px solid #ced4da; border-radius: 4px; font-size: 12px; height: 20px; background: white;" min="1"></div>
+                                <span style="font-size: 12px; color: #495057;">🛡️ 最低在庫:</span>
+                                <div style="display: flex; align-items: center; gap: 3px;"><input type="number" name="safety_stock" value="{{ item.safety_stock }}" style="width: 48px !important; padding: 1px 4px; text-align: center; border: 1px solid #ced4da; border-radius: 4px; font-size: 12px; height: 20px; background: white;" min="0"><span style="font-size: 12px; color: #6c757d;">個</span><span style="font-size: 10px; color: #28a745; font-weight: bold; margin-left: 2px;">(推奨:{{ item.suggested_safety_stock }})</span></div>
+                            </div>
+                            <div style="margin-bottom: 5px; display: grid; grid-template-columns: 80px 1fr; gap: 4px 6px; align-items: center; line-height: 1.2;">
+                                <span style="font-size: 12px; color: #495057;">📊長期ベース:</span>
+                                <select name="trend_days" style="font-size: 12px; padding: 1px 2px; height: 22px; border-radius: 4px; border: 1px solid #ced4da; background: white; width: 100%;"><option value="90" {% if item.product.trend_days == 90 %}selected{% endif %}>90日間（標準）</option><option value="120" {% if item.product.trend_days == 120 %}selected{% endif %}>120日間</option><option value="150" {% if item.product.trend_days == 150 %}selected{% endif %}>150日間</option><option value="180" {% if item.product.trend_days == 180 %}selected{% endif %}>180日間</option></select>
+                                <span style="font-size: 12px; color: #495057;">📐超過ルール:</span>
+                                <select name="lot_rule" style="font-size: 12px; padding: 1px 2px; height: 22px; border-radius: 4px; border: 1px solid #ced4da; background: white; width: 100%;"><option value="ROUND_UP_LOT" {% if item.product.lot_rule == 'ROUND_UP_LOT' %}selected{% endif %}>ロット単位の倍数に切上</option><option value="MIN_LOT_ONLY" {% if item.product.lot_rule == 'MIN_LOT_ONLY' %}selected{% endif %}>最低ロット後は1個刻み</option></select>
+                                <span style="font-size: 12px; color: #495057;">🎯需要参照元:</span>
+                                <select name="demand_source" style="font-size: 12px; padding: 1px 2px; height: 22px; border-radius: 4px; border: 1px solid #ced4da; background: white; width: 100%;"><option value="IKUJI" {% if item.product.demand_source == 'IKUJI' %}selected{% endif %}>自社(日本育児)売上</option><option value="SELECT" {% if item.product.demand_source == 'SELECT' %}selected{% endif %}>ペットセレクト売上</option></select>
+                            </div>
+                            {% if item.product.abc_rank == 'DEAD' %}<div style="margin-bottom: 5px; background-color: #f1f0ff; padding: 3px 6px; border-radius:4px; border: 1px dashed #6f42c1;"><label style="color: #6f42c1; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 4px; margin: 0;"><input type="checkbox" name="allow_dead_order" {% if item.product.allow_dead_order %}checked{% endif %} style="margin:0;"> 🔓 例外発注を許可</label></div>{% endif %}
+                            <div style="margin-bottom: 6px; background-color: #fff5f5; border: 1px dashed #ffc9c9; padding: 4px 6px; border-radius: 4px;"><label style="display: flex; align-items: center; gap: 5px; cursor: pointer; margin: 0; user-select: none;"><input type="checkbox" name="is_excluded" {% if item.product.is_excluded %}checked{% endif %} style="margin: 0; cursor: pointer;"><span style="font-size: 12px; color: #e03131; font-weight: bold;">🚫 この商品を管理外にする</span></label></div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;"><button type="submit" style="background-color: #495057; color: white; border: none; padding: 2px 6px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 12px; height: 22px;">⚙️ 更新</button></form>
+                                <form action="{% url 'delete_product' item.product.id %}" method="POST" style="margin:0;" onsubmit="return confirm('商品を削除しますか？');">{% csrf_token %}<button type="submit" style="background: none; color: #dc3545; border: none; padding: 0; text-decoration: underline; font-size: 12px; cursor: pointer; font-weight: bold;">🗑️ 削除</button></form>
+                            </div>
+                            <button type="button" class="graph-btn" onclick="openGraphModal('{{ item.product.name|escapejs }}', [{% for day in item.forecast_timeline %}{{ day.stock }},{% endfor %}], [{% for day in item.forecast_timeline %}'{{ day.date|date:'m/d' }}',{% endfor %}], {{ item.order_point }}, {{ item.safety_stock }})">📈 グラフ推移をシミュレーション</button>
+                    </td>
+                    
+                    <td class="num-cell" style="background-color: #fff; line-height: 1.3;">
+                        <div style="font-weight: bold; font-size: 14px;">{{ item.current_quantity }} 個</div>
+                        <div style="font-size: 11px; color: #0056b3; font-weight: bold; margin-top: 2px;">🎯 {{ item.order_point }} 個</div>
+                        <div class="wh-breakdown">
+                            {% for wh in item.warehouse_breakdown %}<div {% if wh.is_transit %}class="transit-badge"{% endif %}>·{{ wh.name }}: {{ wh.quantity }}</div>{% endfor %}
+                            <div style="color: #0056b3; font-size: 10px; font-weight: bold; margin-top: 4px; border-top: 1px dashed #ced4da; padding-top: 3px;">📋 {{ item.inventory_date|date:"Y年m月末" }} 棚卸</div>
+                        </div>
+                    </td>
+                    <td class="num-cell" style="color: #0056b3; font-weight: bold;">{{ item.demand_long_display }}<span style="font-size: 9px; color: gray; display: block; font-weight: normal;">({{ item.product.trend_days }}日平均換算)</span></td>
+                    <td class="num-cell" style="color: #666;">{{ item.demand_60 }}</td><td class="num-cell" style="color: #666;">{{ item.demand_30 }}</td>
+
+
+
+
+<td style="padding: 0; vertical-align: top; background-color: #fff; min-width: 140px; height: 1px;">
+                        <div style="display: grid; grid-template-rows: repeat(3, 1fr); height: 100%;">
+                            
+                            <div style="padding: 4px 6px; font-size: 13px; border-bottom: 1px solid #ddd; text-align: left; background-color: #fffafc; display: flex; align-items: center;">
+                                <div>
+                                    <span style="font-weight: bold; color: #666;">{{ item.applied_trend }}x</span>
+                                    {% if item.raw_trend != item.applied_trend %}
+                                        <span class="trend-badge" style="background-color: #ffdddd; color: #cc0000; font-size: 9px; padding: 1px 3px; border-radius: 3px;">元:{{ item.raw_trend }}x➔補正</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div style="padding: 4px 6px; font-size: 12px; border-bottom: 1px solid #ddd; text-align: left; display: flex; align-items: center;">
+                                {% if item.status_alert == "🪵 処分推奨" %} <strong style="color: #6f42c1; background-color:#f1e9ff; padding:2px 4px; border-radius:4px; font-size: 11px;">🪵 処分推奨</strong>
+                                {% elif "🚨 欠品リスク" in item.status_alert %} <strong style="color: red; font-size: 12px;">🚨 欠品リスク</strong>
+                                {% elif "⚠️ 発注点割れ" in item.status_alert %} <strong style="color: #e0a800; font-size: 12px;">⚠️ 発注点割れ</strong>
+                                {% else %} <span style="color: green; font-weight: bold;">{{ item.status_alert }}</span> {% endif %}
+                            </div>
+                            
+                            <div style="padding: 4px 6px; font-size: 12px; text-align: left; display: flex; flex-direction: column; justify-content: center; gap: 2px;">
+                                {% if item.needs_order %}
+                                    <form action="{% url 'create_order_plan' item.product.id %}" method="POST" style="margin: 0;">
+                                        {% csrf_token %}
+                                        <button type="submit" style="background-color: #dc3545; color: white; border: none; padding: 1px 6px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 11px; height: 18px; line-height: 1;">自動計算発注</button>
+                                    </form>
+                                {% else %}
+                                    <span style="color: gray; font-size: 11px; display: block;">不要</span>
+                                {% endif %}
+                                
+                                {% if item.days_to_deadline is not None %}
+                                    <div style="font-size: 11px; font-weight: bold; color: {% if item.days_to_deadline <= 0 %}#dc3545{% elif item.days_to_deadline <= 7 %}#e0a800{% else %}#28a745{% endif %}; line-height: 1.1;">
+                                        ⏳ 発注期限：{% if item.days_to_deadline <= 0 %}即発注🚨{% else %}あと {{ item.days_to_deadline }} 日{% endif %}
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                        </div>
+                    </td>
+                    {% for day in item.forecast_timeline %}<td class="timeline-cell" {% if day.stock <= 0 or day.stock <= item.safety_stock %} style="background-color: #ffcccc; color: Red; font-weight: bold;" {% elif day.stock <= item.order_point %} style="background-color: #fff3cd; color: #b58100; font-weight: bold;" {% endif %}><div>{{ day.stock }}</div><span class="detail-sub">{% if day.ship > 0 %}<span class="ship-text">出:{{ day.ship }}</span>{% endif %}{% if day.arr_kakutei > 0 %}<span class="arr-text">確:{{ day.arr_kakutei }}</span>{% endif %}{% if day.arr_koukaku > 0 %}<span class="arr-ko-text">高:{{ day.arr_koukaku }}</span>{% endif %}{% if day.arr_kibou > 0 %}<span class="arr-ko-text" style="color: #6c757d;">希:{{ day.arr_kibou }}</span>{% endif %}</span></td>{% endfor %}
+                </tr>
+                {% empty %}<tr> <td colspan="130" style="padding: 10px; text-align: center;">データが見つかりません。</td> </tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div style="margin-top: 10px; flex-shrink: 0; display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 13px; background: #fff; padding: 8px; border-top: 1px solid #dee2e6;">
+        {% if page_obj.has_previous %}
+            <button type="button" onclick="changePage(1)" class="page-btn">« 最初</button>
+            <button type="button" onclick="changePage({{ page_obj.previous_page_number }})" class="page-btn">‹ 前へ</button>
+        {% endif %}
+        <span style="font-weight: bold; color: #495057; background: #e9ecef; padding: 4px 12px; border-radius: 20px;">
+            {{ page_obj.number }} / {{ page_obj.paginator.num_pages }} ページ (該当商品: 全 {{ page_obj.paginator.count }} 件)
+        </span>
+        {% if page_obj.has_next %}
+            <button type="button" onclick="changePage({{ page_obj.next_page_number }})" class="page-btn">次へ ›</button>
+            <button type="button" onclick="changePage({{ page_obj.paginator.num_pages }})" class="page-btn">最後 »</button>
+        {% endif %}
+    </div>
+
+    <div id="graphModal" class="modal">
+        <div class="modal-content"><span class="close-btn" onclick="closeModal()">&times;</span><h3 id="modalTitle" style="margin-top: 0; color: #333;">商品別 在庫予測推移</h3><div style="position: relative; width: 100%; height: 400px;"><canvas id="predictionChart"></canvas></div></div>
+    </div>
+
+    <script>
+        function toggleOrderPanel() { const panel = document.getElementById('orderFoldPanel'); const icon = document.getElementById('orderToggleIcon'); panel.style.display = (panel.style.display === 'none') ? 'block' : 'none'; icon.innerText = (panel.style.display === 'none') ? '[ クリックで展開 ＋ ]' : '[ クリックで収納 － ]'; }
+        function toggleCsvPanel() { const panel = document.getElementById('csvFoldPanel'); panel.style.display = (panel.style.display === 'none' || panel.style.display === '') ? 'block' : 'none'; }
+        function toggleArrivalPanel() { const panel = document.getElementById('arrivalFoldPanel'); const icon = document.getElementById('arrivalToggleIcon'); panel.style.display = (panel.style.display === 'none') ? 'block' : 'none'; icon.innerText = (panel.style.display === 'none') ? '[ クリックで展開 ＋ ]' : '[ クリックで収納 － ]'; }
+        function toggleSimPanel() { const panel = document.getElementById('simFoldPanel'); const icon = document.getElementById('simToggleIcon'); panel.style.display = (panel.style.display === 'none') ? 'block' : 'none'; icon.innerText = (panel.style.display === 'none') ? '[ クリックで展開 ＋ ]' : '[ クリックで収納 － ]'; if(panel.style.display==='block'){ setTimeout(runLogicSimulator, 50); } }
+        
+        // 一括選択スクリプト
+        function toggleSelectAll(master) { const checkboxes = document.querySelectorAll('.item-checkbox'); checkboxes.forEach(cb => cb.checked = master.checked); }
+        // パラメータ保持ページネーション
+        function changePage(pageNum) { const url = new URL(window.location.href); url.searchParams.set('page', pageNum); window.location.href = url.toString(); }
+
+        let myChart = null;
+        function openGraphModal(productName, stockData, dateLabels, orderPoint, safetyStock) {
+            document.getElementById('graphModal').style.display = "block";
+            document.getElementById('modalTitle').innerText = productName + " - 未来120日間 在庫推移シミュレーション";
+            if (myChart) { myChart.destroy(); }
+            const ctx = document.getElementById('predictionChart').getContext('2d');
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dateLabels,
+                    datasets: [
+                        { label: '予測在庫数', data: stockData, borderColor: '#007bff', backgroundColor: 'rgba(0, 123, 255, 0.05)', borderWidth: 2, pointRadius: 1, tension: 0.1, fill: true },
+                        { label: '発注点基準', data: Array(120).fill(orderPoint), borderColor: '#ffc107', borderWidth: 1, borderDash: [5, 5], pointRadius: 0, fill: false },
+                        { label: '安全在庫基準', data: Array(120).fill(safetyStock), borderColor: '#dc3545', borderWidth: 1, borderDash: [3, 3], pointRadius: 0, fill: false }
+                    ]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { title: { display: true, text: '在庫数 (個)' } }, x: { title: { display: true, text: '日付' }, grid: { display: false } } } }
+            });
+        }
+        function closeModal() { document.getElementById('graphModal').style.display = "none"; }
+        window.onclick = function(event) { const modal = document.getElementById('graphModal'); if (event.target == modal) { modal.style.display = "none"; } }
+
+        // ★新設：⑤ 需要予測ロジック検証シミュレーターの駆動用独立スクリプト
+        let simChartObj = null;
+        function runLogicSimulator() {
+            const stock = parseInt(document.getElementById('sim_stock').value) || 0;
+            const demand = parseInt(document.getElementById('sim_demand').value) || 0;
+            const wave = document.getElementById('sim_wave').value;
+            const lt = parseInt(document.getElementById('sim_lt').value) || 0;
+            const safety = parseInt(document.getElementById('sim_safety').value) || 0;
+            const op = (demand * lt) + safety;
+            document.getElementById('sim_op_val').innerText = op;
+
+            let timeline = []; let labels = []; let current = stock; let hasShortage = false; let hasOP = false;
+            for(let i=0; i<=60; i++) {
+                labels.push("D+" + i);
+                if(i > 0) {
+                    let actualDemand = demand;
+                    if(wave === 'small') { actualDemand += (Math.random() * 4 - 2); }
+                    else if(wave === 'large') { actualDemand += (Math.random() * 12 - 6); }
+                    current -= Math.max(0, Math.round(actualDemand));
+                }
+                timeline.push(current);
+                if(current <= 0) hasShortage = true;
+                else if(current <= op) hasOP = true;
+            }
+
+            const statusEl = document.getElementById('sim_alert_status');
+            if(hasShortage) { statusEl.innerText = "🚨 欠品リスク発生"; statusEl.style.backgroundColor = "#ffe6e6"; statusEl.style.color = "#dc3545"; }
+            else if(hasOP) { statusEl.innerText = "⚠️ 発注点割れ状態"; statusEl.style.backgroundColor = "#fff3cd"; statusEl.style.color = "#856404"; }
+            else { statusEl.innerText = "✅ 正常稼働圏内"; statusEl.style.backgroundColor = "#d4edda"; statusEl.style.color = "#155724"; }
+
+            if(simChartObj) { simChartObj.destroy(); }
+            const ctx = document.getElementById('simChart').getContext('2d');
+            simChartObj = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: '検証在庫線', data: timeline, borderColor: '#28a745', borderWidth: 2, pointRadius: 0, fill: false },
+                        { label: '発注点', data: Array(61).fill(op), borderColor: '#ffc107', borderWidth: 1, borderDash: [4,4], pointRadius: 0 },
+                        { label: '安全在庫', data: Array(61).fill(safety), borderColor: '#dc3545', borderWidth: 1, borderDash: [2,2], pointRadius: 0 }
+                    ]
+                },
+                options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { y: { grid: { color: '#eee' } }, x: { grid: { display: false } } } }
+            });
+        }
+        // ★新設：シミュレーターの枠サイズを任意に引き伸ばして再描画をかける関数
+        function resizeSimChart(targetHeight) {
+            const container = document.getElementById('simChartContainer');
+            if (container) {
+                container.style.height = targetHeight; // 枠の高さ（180px / 400px / 650px）を書き換え
+                if (simChartObj) {
+                    simChartObj.resize(); // Chart.jsにサイズが変わったことを通知して超高解像度で再描画
+                }
+            }
+        }
+        // 🖨️★新設：発注計画だけを綺麗なA4帳票として抜き出し印刷する関数
+        function printOrderPlanSheet() {
+            const table = document.getElementById('orderFoldPanel').querySelector('.order-table');
+            if (!table) return;
+            
+            // テーブルを一度丸ごとコピー
+            const tableCopy = table.cloneNode(true);
+            
+            // 印刷に不要な右端の「アクションボタン（操作用）」の列を自動でもぎ取る
+            const rows = tableCopy.querySelectorAll('tr');
+            rows.forEach(row => {
+                if (row.lastElementChild) {
+                    row.removeChild(row.lastElementChild);
+                }
+            });
+            
+            // 現在の会社名と本日の日付を自動取得
+            const companyName = "{{ current_company }}" === "IKUJI" ? "日本育児" : "ペットセレクト";
+            const todayStr = new Date().toLocaleDateString('ja-JP', {year:'numeric', month:'2-digit', day:'2-digit'});
+
+            // 印刷専用のクリーンな別ウィンドウを立ち上げる
+            const printWindow = window.open('', '_blank');
+            printWindow.document.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>発注計画指示書_${companyName}</title>
+                    <style>
+                        body { font-family: sans-serif; padding: 20px; color: #000; background: #fff; }
+                        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 6px; margin-bottom: 15px; }
+                        h1 { margin: 0; font-size: 18pt; color: #111; }
+                        .date { font-size: 11pt; font-weight: bold; }
+                        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10pt; }
+                        th, td { border: 1px solid #000; padding: 6px 8px; text-align: left; }
+                        th { background-color: #f2f2f2; font-weight: bold; }
+                        td:nth-child(4) { text-align: right; font-weight: bold; } /* 数量列を右寄せ */
+                        @media print { body { padding: 0; } }
+                    </style>
+                </head>
+                <body>
+                    <div class="header">
+                        <h1>📦 発注計画指示書 （${companyName} 管轄）</h1>
+                        <div class="date">出力日: ${todayStr}</div>
+                    </div>
+                    ${tableCopy.outerHTML}
+                </body>
+                </html>
+            `);
+            printWindow.document.close();
+            
+            // ウィンドウの読み込みを待ってから印刷ダイアログを自動起動、終了後に窓を閉じる
+            printWindow.focus();
+            setTimeout(() => {
+                printWindow.print();
+                printWindow.close();
+            }, 250);
+        }
+    </script>
+</body>
+</html>

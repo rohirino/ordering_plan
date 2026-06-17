@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>商品一覧 - 発注計画システム</title>
+</head>
+<body>
+    <h1>商品一覧</h1>
+    
+    <p><a href="/admin/">→ 管理画面へ（データの追加はこちら）</a></p>
+
+    <table border="1" style="border-collapse: collapse; width: 100%; text-align: left;">
+        <thead>
+            <tr style="background-color: #f2f2f2;">
+                <th style="padding: 8px;">商品名</th>
+                <th style="padding: 8px;">単価</th>
+                <th style="padding: 8px;">仕入先</th>
+                <th style="padding: 8px;">リードタイム</th>
+                <th style="padding: 8px;">発注ロット</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for product in products %}
+            <tr>
+                <td style="padding: 8px;">{{ product.name }}</td>
+                <td style="padding: 8px;">{{ product.price }} 円</td>
+                <td style="padding: 8px;">{{ product.supplier }}</td>
+                <td style="padding: 8px;">{{ product.lead_time }} 日</td>
+                <td style="padding: 8px;">{{ product.order_lot }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" style="padding: 8px; text-align: center;">商品が登録されていません。</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

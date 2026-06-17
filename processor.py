@@ -1,7 +1,7 @@
 import pandas as pd
 
 # 1. 読み込み (ヘッダーのスキップは2行)
-df = pd.read_csv('raw_sales_data.csv', skiprows=2, encoding='utf-8')
+df = pd.read_csv('raw_sales_data.csv', skiprows=2, encoding='cp932')  # Shift_JISのエンコードで読み込む場合はcp932を指定
 
 # 2. カラム名を予測システム用に統一
 df = df.rename(columns={'コード': '得意先コード', 'コード.1': '商品コード', '伝票日付': '日付'})

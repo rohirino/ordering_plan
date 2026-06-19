@@ -35,8 +35,14 @@ def _get_csv_reader(uploaded_file):
     decoded_text = decoded_text.replace('\ufeff', '')
     lines = decoded_text.splitlines()
     if lines:
-        cleaned_headers = [h.strip() for h in next(csv.reader([lines[0]]))]
-        return csv.DictReader(io.StringIO("\n".join(lines[1:])), fieldnames=cleaned_headers)
+        header_index = 0
+        for idx, line in enumerate(lines[:20]):
+            headers = [h.strip() for h in next(csv.reader([line]))]
+            if '商品コード' in headers:
+                header_index = idx
+                break
+        cleaned_headers = [h.strip() for h in next(csv.reader([lines[header_index]]))]
+        return csv.DictReader(io.StringIO("\n".join(lines[header_index + 1:])), fieldnames=cleaned_headers)
     return csv.DictReader(io.StringIO(decoded_text))
 
 def _normalize_inventory_product_code(raw_code):
@@ -75,6 +81,22 @@ def _parse_csv_date(value):
         except ValueError:
             continue
     return None
+
+def _pick_first_value(row, candidates, default=''):
+    for key in candidates:
+        if key in row and str(row.get(key, '')).strip():
+            return row.get(key)
+    return default
+
+def _normalize_arrival_status(value):
+    raw_status = str(value or '').strip()
+    if raw_status in ['確定', '高確度', '希望']:
+        return raw_status, False
+    if raw_status in ['入港決定', '入荷決定', '入港決定/入荷決定', '決定']:
+        return '確定', False
+    if raw_status in ['未定', '予定', '希望納期']:
+        return '希望', False
+    return '確定', bool(raw_status)
 
 def _build_arrival_map(queryset):
     arr_map = {}
@@ -943,17 +965,16 @@ def import_arrivals_csv(request):
                 if code not in p_dict:
                     unknown_count += 1
                     continue
-                dk = '入荷予定日' if '入荷予定日' in row else '予定日'; qk = '入荷予定数量' if '入荷予定数量' in row else '入荷数量'
-                ad = _parse_csv_date(row.get(dk))
-                qty, quantity_error = _parse_csv_quantity(row.get(qk))
+                arrival_date_value = _pick_first_value(row, ['入荷予定日', '予定日', '入荷日', '入港日'])
+                quantity_value = _pick_first_value(row, ['入荷予定数量', '入荷数量', '数量'])
+                ad = _parse_csv_date(arrival_date_value)
+                qty, quantity_error = _parse_csv_quantity(quantity_value)
                 if not ad or quantity_error:
                     error_count += 1
                     continue
-                raw_status = str(row.get('確度ステータス', '確定')).strip()
-                if raw_status in ['確定', '高確度', '希望']:
-                    status = raw_status
-                else:
-                    status = '確定'
+                status_value = _pick_first_value(row, ['確度ステータス', '確度', '決定'], default='確定')
+                status, status_was_fixed = _normalize_arrival_status(status_value)
+                if status_was_fixed:
                     status_fixed_count += 1
                 key = (code, ad, status)
                 aggregated[key] = aggregated.get(key, 0) + qty

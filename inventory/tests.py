@@ -260,6 +260,31 @@ class ImportProductsCommandTests(TestCase):
             2,
         )
 
+    def test_arrivals_upload_accepts_management_arrival_export_format(self):
+        product = Product.objects.create(code='5011100', name='ペットゲート', owner_company='SELECT')
+        rows = [
+            ['輸入到着予定表,2026年06月19日(金)'],
+            ['【入荷日：2026年 6月 1日 ～ 】【入港完了/入荷完了の明細は表示しない】'],
+            ['発注日付', 'P/O No', 'ｻﾌﾞP/ONo', 'シートNo', '商品コード', '商品名', '数量', '備考', '仕入先ｺｰﾄﾞ', '仕入先名', '入港日', '納入場所', '入荷日', '決定', '備考１', '備考２', '備考３'],
+            ['2026/2/4', '26-011', '', '26-06-002', '5011100001', 'ﾍﾟｯﾄｹﾞｰﾄ', '200', '', '000501', 'Bennington(Taiwan)', '2026/5/26', 'ニチイク物流', '2026/6/2', '入港決定/入荷決定', '', '', ''],
+        ]
+        uploaded = SimpleUploadedFile(
+            'template_arrivals.csv',
+            self.csv_bytes(rows),
+            content_type='text/csv',
+        )
+
+        response = self.client.post(
+            reverse('import_arrivals_csv'),
+            {'current_company': 'SELECT', 'csv_file': uploaded},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        arrival = ArrivalSchedule.objects.get(product=product)
+        self.assertEqual(arrival.arrival_date.isoformat(), '2026-06-02')
+        self.assertEqual(arrival.quantity, 200)
+        self.assertEqual(arrival.status, '確定')
+
     def test_invalid_arrivals_upload_does_not_delete_existing_data(self):
         product = Product.objects.create(code='6460010', name='グリップ シート', owner_company='IKUJI')
         ArrivalSchedule.objects.create(product=product, arrival_date='2026-06-15', quantity=10, status='確定')

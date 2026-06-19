@@ -1,0 +1,232 @@
+{% load inventory_extras %}
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>棚卸資産評価ダッシュボード</title>
+    <style>
+        html, body { margin: 0; min-height: 100%; font-family: sans-serif; color: #24292f; background: #fff7f7; }
+        body { padding: 14px; box-sizing: border-box; }
+        .topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+        h1 { margin: 0; font-size: 24px; line-height: 1.1; }
+        h2 { margin: 0 0 10px 0; font-size: 20px; }
+        .lead { font-size: 12px; color: #6c757d; margin-top: 4px; font-weight: bold; }
+        .nav { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+        .nav-group { display: flex; gap: 6px; align-items: center; padding-left: 10px; border-left: 1px solid #ced4da; }
+        .nav-group:first-child { border-left: 0; padding-left: 0; }
+        .nav-label { font-size: 10px; font-weight: bold; color: #6c757d; }
+        .btn, button { border: 1px solid #b8c2cc; background: #fff; color: #212529; padding: 5px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; text-decoration: none; cursor: pointer; white-space: nowrap; }
+        .btn.dark { background: #495057; border-color: #495057; color: #fff; }
+        .btn.primary, button.primary { background: #c92a2a; border-color: #c92a2a; color: #fff; }
+        body.company-select { background: #f5f9ff; }
+        body.company-select .btn.primary, body.company-select button.primary { background: #1864ab; border-color: #1864ab; }
+        .asset-banner { background: #c92a2a; color: #fff; border-radius: 5px; padding: 9px 14px; font-size: 13px; font-weight: bold; margin-bottom: 10px; }
+        body.company-select .asset-banner { background: #1864ab; }
+        .panel { background: #fff; border: 1px solid #ffc9c9; border-radius: 7px; padding: 12px; box-sizing: border-box; }
+        body.company-select .panel { border-color: #b8daff; }
+        .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+        label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: bold; color: #495057; }
+        input, select { padding: 4px 7px; border: 1px solid #ced4da; border-radius: 4px; font-size: 12px; box-sizing: border-box; background: #fff; }
+        .messages { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+        .message { padding: 6px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; background: #d3f9d8; color: #2b5730; border: 1px solid #b2f2bb; }
+        .kpis { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 10px; margin: 10px 0; }
+        .kpi { background: #eef8fb; border: 1px solid #c5e7ef; border-radius: 6px; padding: 10px 12px; }
+        .kpi span { display: block; font-size: 12px; color: #495057; font-weight: bold; }
+        .kpi strong { display: block; margin-top: 4px; font-size: 24px; line-height: 1; letter-spacing: 0; }
+        .warehouse-panel { margin-bottom: 10px; }
+        .lower-grid { display: grid; grid-template-columns: minmax(360px, 0.7fr) minmax(620px, 1.3fr); gap: 10px; align-items: stretch; }
+        .scroll { overflow: auto; border: 1px solid #dee2e6; background: #fff; }
+        .warehouse-scroll { max-height: 180px; }
+        .lower-scroll { height: calc(100vh - 560px); min-height: 320px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td { border: 1px solid #dee2e6; padding: 6px 8px; text-align: left; vertical-align: middle; }
+        th { background: #e9ecef; position: sticky; top: 0; z-index: 2; font-weight: bold; }
+        .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .code { white-space: nowrap; }
+        .name-cell { min-width: 260px; }
+        .compact-form { display: flex; gap: 5px; align-items: center; margin: 0; }
+        .compact-form label { display: flex; flex-direction: row; align-items: center; gap: 4px; margin: 0; font-size: 12px; }
+        .filter-bar { display: flex; justify-content: space-between; align-items: end; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+        .filter-bar form { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; margin: 0; }
+        .bulk-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+        .count-note { font-size: 12px; color: #6c757d; font-weight: bold; }
+        @media (max-width: 1100px) {
+            .lower-grid { grid-template-columns: 1fr; }
+            .lower-scroll { height: 360px; }
+            .topbar { flex-direction: column; }
+        }
+    </style>
+</head>
+<body class="{% if current_company == 'IKUJI' %}company-ikuji{% else %}company-select{% endif %}">
+    <div class="topbar">
+        <div>
+            <h1>棚卸資産評価ダッシュボード</h1>
+            <div class="lead">状態コード別の数量・原価・在庫金額を管理し、発注計画用在庫へ反映します。</div>
+        </div>
+        <div class="nav">
+            <div class="nav-group">
+                <span class="nav-label">Dashboard</span>
+                <a class="btn dark" href="{% url 'planning_dashboard' %}?current_company={{ current_company }}">在庫・発注計画</a>
+                <a class="btn" href="{% url 'product_master_dashboard' %}?current_company={{ current_company }}">商品マスタ登録</a>
+                <a class="btn" href="{% url 'sales_history_dashboard' %}?current_company={{ current_company }}">日次販売履歴</a>
+                <a class="btn" href="{% url 'arrivals_dashboard' %}?current_company={{ current_company }}">入荷予定・発注残</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">説明</span>
+                <a class="btn" href="{% url 'about_app' %}?current_company={{ current_company }}">このアプリについて</a>
+                <a class="btn" href="{% url 'operation_guide' %}?current_company={{ current_company }}" target="_blank">画面説明・運用ガイド</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">管理</span>
+                <a class="btn" href="/admin/" target="_blank">Django管理画面</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">会社</span>
+                <a class="btn {% if current_company == 'IKUJI' %}primary{% endif %}" href="?current_company=IKUJI">日本育児</a>
+                <a class="btn {% if current_company == 'SELECT' %}primary{% endif %}" href="?current_company=SELECT">ペットセレクト</a>
+            </div>
+        </div>
+    </div>
+
+    {% if messages %}
+        <div class="messages">
+            {% for message in messages %}<div class="message">{{ message.message }}</div>{% endfor %}
+        </div>
+    {% endif %}
+
+    <div class="asset-banner">
+        登録先資産:
+        {% if current_company == 'IKUJI' %}日本育児{% else %}ペットセレクト{% endif %}
+        <span style="font-size: 11px; font-weight: normal; margin-left: 18px;">状態コード 400 / 401 / 404 はペットセレクト資産として自動登録</span>
+    </div>
+
+    <div class="panel">
+        <div class="controls">
+            <form method="GET" class="controls" style="margin:0;">
+                <input type="hidden" name="current_company" value="{{ current_company }}">
+                <label>棚卸日
+                    <select name="inventory_date" onchange="this.form.submit();">
+                        {% if selected_date %}<option value="{{ selected_date|date:'Y-m-d' }}">{{ selected_date|date:"Y年m月d日" }}</option>{% endif %}
+                        {% for date in available_dates %}
+                            {% if date != selected_date %}<option value="{{ date|date:'Y-m-d' }}">{{ date|date:"Y年m月d日" }}</option>{% endif %}
+                        {% endfor %}
+                    </select>
+                </label>
+                <button type="submit">表示</button>
+            </form>
+
+            <form action="{% url 'import_valuation_csv' %}" method="POST" enctype="multipart/form-data" class="controls" style="margin:0;">
+                {% csrf_token %}<input type="hidden" name="current_company" value="{{ current_company }}">
+                <label>登録する棚卸日<input type="date" name="inventory_date" value="{{ selected_date|date:'Y-m-d' }}" required></label>
+                <label>棚卸CSV
+                    <span><a href="{% url 'download_valuation_template' %}?current_company={{ current_company }}" style="color:#0b7285;">[雛形]</a></span>
+                    <input type="file" name="csv_file" accept=".csv" required>
+                </label>
+                <button class="primary" type="submit">取込</button>
+            </form>
+
+            <form action="{% url 'import_inventory_state_csv' %}" method="POST" enctype="multipart/form-data" class="controls" style="margin:0;">
+                {% csrf_token %}<input type="hidden" name="current_company" value="{{ current_company }}">
+                <label>状態マスタCSV<input type="file" name="csv_file" accept=".csv" required></label>
+                <button type="submit">状態名登録</button>
+            </form>
+
+            <form action="{% url 'sync_valuation_to_planning' %}" method="POST" style="margin:0;">
+                {% csrf_token %}<input type="hidden" name="current_company" value="{{ current_company }}"><input type="hidden" name="inventory_date" value="{{ selected_date|date:'Y-m-d' }}">
+                <button class="primary" type="submit">発注計画へ数量反映</button>
+            </form>
+
+            <a class="btn" href="{% url 'export_valuation_excel' %}?current_company={{ current_company }}&inventory_date={{ selected_date|date:'Y-m-d' }}">Excel出力</a>
+            <a class="btn" href="{% url 'export_valuation_pdf' %}?current_company={{ current_company }}&inventory_date={{ selected_date|date:'Y-m-d' }}">PDF出力</a>
+        </div>
+    </div>
+
+    <div class="kpis">
+        <div class="kpi"><span>在庫数量合計</span><strong>{{ total_quantity|comma }}</strong></div>
+        <div class="kpi"><span>在庫金額合計</span><strong>{{ total_amount|comma }}</strong></div>
+        <div class="kpi"><span>状態別明細数</span><strong>{{ variant_total_count|comma }}</strong></div>
+    </div>
+
+    <div class="panel warehouse-panel">
+        <h2>倉庫別在庫金額</h2>
+        <div class="scroll warehouse-scroll">
+            <table>
+                <thead><tr><th>倉庫</th><th class="num">数量</th><th class="num">在庫金額</th></tr></thead>
+                <tbody>{% for row in warehouse_summary %}<tr><td>{{ row.warehouse__name }}</td><td class="num">{{ row.quantity|default:0|comma }}</td><td class="num">{{ row.amount|default:0|comma }}</td></tr>{% empty %}<tr><td colspan="3">データがありません。</td></tr>{% endfor %}</tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="lower-grid">
+        <div class="panel">
+            <h2>商品別在庫金額</h2>
+            <div class="scroll lower-scroll">
+                <table>
+                    <thead><tr><th>商品コード</th><th>商品名</th><th class="num">数量</th><th class="num">在庫金額</th></tr></thead>
+                    <tbody>{% for row in product_summary %}<tr><td class="code">{{ row.product_variant__product__code }}</td><td>{{ row.product_variant__product__name }}</td><td class="num">{{ row.quantity|default:0|comma }}</td><td class="num">{{ row.amount|default:0|comma }}</td></tr>{% empty %}<tr><td colspan="4">データがありません。</td></tr>{% endfor %}</tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="filter-bar">
+                <div>
+                    <h2>状態コード別明細</h2>
+                    <div class="count-note">表示 {{ variant_filtered_count|comma }} / 全 {{ variant_total_count|comma }} 件</div>
+                    <form action="{% url 'bulk_update_product_variant_planning_flags' %}" method="POST" class="bulk-actions">
+                        {% csrf_token %}
+                        <input type="hidden" name="current_company" value="{{ current_company }}">
+                        <input type="hidden" name="inventory_date" value="{{ selected_date|date:'Y-m-d' }}">
+                        <input type="hidden" name="state_code" value="{{ state_code_filter }}">
+                        <input type="hidden" name="state_name" value="{{ state_name_filter }}">
+                        <input type="hidden" name="planning_filter" value="{{ planning_filter }}">
+                        <input type="hidden" name="variant_sort" value="{{ variant_sort }}">
+                        <input type="hidden" name="variant_order" value="{{ variant_order }}">
+                        <button type="submit" name="bulk_action" value="include">表示中を含める</button>
+                        <button type="submit" name="bulk_action" value="exclude">表示中を除外</button>
+                    </form>
+                </div>
+                <form method="GET">
+                    <input type="hidden" name="current_company" value="{{ current_company }}">
+                    <input type="hidden" name="inventory_date" value="{{ selected_date|date:'Y-m-d' }}">
+                    <label>状態コード<input type="text" name="state_code" value="{{ state_code_filter }}" placeholder="001" style="width:80px;"></label>
+                    <label>状態名<input type="text" name="state_name" value="{{ state_name_filter }}" placeholder="A品" style="width:120px;"></label>
+                    <label>発注計画反映
+                        <select name="planning_filter">
+                            <option value="" {% if not planning_filter %}selected{% endif %}>すべて</option>
+                            <option value="included" {% if planning_filter == 'included' %}selected{% endif %}>含める</option>
+                            <option value="excluded" {% if planning_filter == 'excluded' %}selected{% endif %}>除外</option>
+                        </select>
+                    </label>
+                    <label>ソート
+                        <select name="variant_sort">
+                            <option value="product_code" {% if variant_sort == 'product_code' %}selected{% endif %}>商品コード</option>
+                            <option value="product_name" {% if variant_sort == 'product_name' %}selected{% endif %}>商品名</option>
+                            <option value="state_code" {% if variant_sort == 'state_code' %}selected{% endif %}>状態コード</option>
+                            <option value="state_name" {% if variant_sort == 'state_name' %}selected{% endif %}>状態名</option>
+                            <option value="planning" {% if variant_sort == 'planning' %}selected{% endif %}>発注計画反映</option>
+                            <option value="unit_cost" {% if variant_sort == 'unit_cost' %}selected{% endif %}>原価</option>
+                            <option value="quantity" {% if variant_sort == 'quantity' %}selected{% endif %}>数量</option>
+                            <option value="amount" {% if variant_sort == 'amount' %}selected{% endif %}>在庫金額</option>
+                        </select>
+                    </label>
+                    <label>順序
+                        <select name="variant_order">
+                            <option value="asc" {% if variant_order == 'asc' %}selected{% endif %}>昇順</option>
+                            <option value="desc" {% if variant_order == 'desc' %}selected{% endif %}>降順</option>
+                        </select>
+                    </label>
+                    <button type="submit">適用</button>
+                    <a class="btn" href="?current_company={{ current_company }}&inventory_date={{ selected_date|date:'Y-m-d' }}">解除</a>
+                </form>
+            </div>
+            <div class="scroll lower-scroll">
+                <table>
+                    <thead><tr><th>商品コード</th><th>商品名</th><th>状態コード</th><th>状態名</th><th>発注計画反映</th><th class="num">原価</th><th class="num">数量</th><th class="num">在庫金額</th></tr></thead>
+                    <tbody>{% for row in variant_summary %}<tr><td class="code">{{ row.product_variant__product__code }}</td><td class="name-cell">{{ row.product_variant__product__name }}</td><td>{{ row.product_variant__state_code }}</td><td>{{ row.product_variant__state_name }}</td><td><form action="{% url 'update_product_variant_planning_flag' row.product_variant_id %}" method="POST" class="compact-form">{% csrf_token %}<label><input type="checkbox" name="include_in_planning_inventory" {% if row.product_variant__include_in_planning_inventory %}checked{% endif %}>含める</label><button type="submit" style="padding:2px 6px; font-size:10px;">保存</button></form></td><td class="num">{{ row.unit_cost|default:0|comma }}</td><td class="num">{{ row.quantity|default:0|comma }}</td><td class="num">{{ row.amount|default:0|comma }}</td></tr>{% empty %}<tr><td colspan="8">データがありません。</td></tr>{% endfor %}</tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

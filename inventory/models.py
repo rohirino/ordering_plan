@@ -2,7 +2,7 @@ import datetime
 from django.db import models
 
 class Product(models.Model):
-    """商品マスタ"""
+    """共通商品マスタ"""
     LOT_RULE_CHOICES = (
         ('ROUND_UP_LOT', '常にロット単位での積み上げ（ケース単位切り上げ）'),
         ('MIN_LOT_ONLY', '最低ロット満たした後は1個単位での積み上げ（バラ混載可）'),
@@ -37,14 +37,19 @@ class Product(models.Model):
     demand_source = models.CharField(verbose_name="需要参照元売上", max_length=20, choices=COMPANY_CHOICES, default='IKUJI')
 
     price = models.IntegerField(verbose_name="標準原価", null=True, blank=True, default=0)
-    supplier = models.CharField(verbose_name="仕仕入先", max_length=100, blank=True, null=True)
+    supplier = models.CharField(verbose_name="仕入先", max_length=100, blank=True, null=True)
     lead_time = models.IntegerField(verbose_name="リードタイム（日数）", default=30)
     order_lot = models.IntegerField(verbose_name="発注ロット", default=1)
     lot_rule = models.CharField(verbose_name="超過時積み上げルール", max_length=20, choices=LOT_RULE_CHOICES, default='ROUND_UP_LOT')
     trend_days = models.IntegerField(verbose_name="長期トレンド計算日数", choices=TREND_DAYS_CHOICES, default=90)
     is_excluded = models.BooleanField(verbose_name="管理外フラグ", default=False)
+    is_discontinued = models.BooleanField(verbose_name="廃盤フラグ", default=False)
     abc_rank = models.CharField(verbose_name="ABCランク評価", max_length=10, choices=ABC_RANK_CHOICES, default='C')
     allow_dead_order = models.BooleanField(verbose_name="処分品発注許可フラグ", default=False)
+    created_from_valuation = models.BooleanField(verbose_name="棚卸CSVから自動生成", default=False)
+    last_valuation_synced_at = models.DateTimeField(verbose_name="棚卸CSV最終反映日時", null=True, blank=True)
+    last_valuation_inventory_date = models.DateField(verbose_name="棚卸CSV対象棚卸日", null=True, blank=True)
+    last_valuation_name_updated = models.BooleanField(verbose_name="棚卸CSVで商品名更新", default=False)
     
     trend_max = models.FloatField(verbose_name="トレンド上限", default=2.0)
     trend_min = models.FloatField(verbose_name="トレンド下限", default=0.5)
@@ -53,8 +58,8 @@ class Product(models.Model):
         return f"[{self.get_owner_company_display()}] [{self.code}] {self.name}"
 
     class Meta:
-        verbose_name = "商品マスタ"
-        verbose_name_plural = "商品マスタ"
+        verbose_name = "共通商品マスタ"
+        verbose_name_plural = "共通商品マスタ"
 
 
 class Warehouse(models.Model):
@@ -101,6 +106,66 @@ class WarehouseInventory(models.Model):
         unique_together = ('product', 'warehouse')
 
 
+class ProductVariant(models.Model):
+    """状態コード別SKU"""
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, verbose_name="商品")
+    state_code = models.CharField(verbose_name="状態コード", max_length=3)
+    state_name = models.CharField(verbose_name="状態名", max_length=100, blank=True, default='')
+    current_cost = models.IntegerField(verbose_name="現在原価", default=0)
+    include_in_planning_inventory = models.BooleanField(verbose_name="発注計画在庫へ反映", default=True)
+
+    def __str__(self):
+        return f"[{self.product.code}-{self.state_code}] {self.product.name} {self.state_name}"
+
+    class Meta:
+        verbose_name = "状態別SKU"
+        verbose_name_plural = "状態別SKU"
+        unique_together = ('product', 'state_code')
+
+
+class InventoryState(models.Model):
+    """在庫状態マスタ"""
+    state_code = models.CharField(verbose_name="状態コード", max_length=3, unique=True)
+    state_name = models.CharField(verbose_name="状態名", max_length=100)
+
+    def __str__(self):
+        return f"[{self.state_code}] {self.state_name}"
+
+    class Meta:
+        verbose_name = "在庫状態マスタ"
+        verbose_name_plural = "在庫状態マスタ"
+
+
+class ProductVariantCostHistory(models.Model):
+    """状態別SKUの原価履歴"""
+    product_variant = models.ForeignKey(ProductVariant, on_delete=models.CASCADE, verbose_name="状態別SKU")
+    effective_date = models.DateField(verbose_name="適用日")
+    unit_cost = models.IntegerField(verbose_name="原価", default=0)
+    source = models.CharField(verbose_name="取込元", max_length=50, blank=True, default='棚卸CSV')
+
+    class Meta:
+        verbose_name = "状態別SKU原価履歴"
+        verbose_name_plural = "状態別SKU原価履歴"
+        unique_together = ('product_variant', 'effective_date')
+
+
+class InventoryValuationSnapshot(models.Model):
+    """棚卸資産評価スナップショット"""
+    COMPANY_CHOICES = (('IKUJI', '日本育児'), ('SELECT', 'ペットセレクト'))
+    inventory_date = models.DateField(verbose_name="棚卸日")
+    product_variant = models.ForeignKey(ProductVariant, on_delete=models.CASCADE, verbose_name="状態別SKU")
+    warehouse = models.ForeignKey(Warehouse, on_delete=models.CASCADE, verbose_name="倉庫")
+    quantity = models.IntegerField(verbose_name="数量", default=0)
+    unit_cost = models.IntegerField(verbose_name="原価", default=0)
+    amount = models.IntegerField(verbose_name="在庫金額", default=0)
+    owner_company = models.CharField(verbose_name="所有会社", max_length=20, choices=COMPANY_CHOICES, default='IKUJI')
+
+    class Meta:
+        verbose_name = "棚卸資産評価"
+        verbose_name_plural = "棚卸資産評価"
+        unique_together = ('inventory_date', 'product_variant', 'warehouse', 'owner_company')
+
+
 class SalesHistory(models.Model):
     """日次販売履歴データ"""
     COMPANY_CHOICES = (('IKUJI', '日本育児'), ('SELECT', 'ペットセレクト'))
@@ -109,6 +174,9 @@ class SalesHistory(models.Model):
     sold_date = models.DateField(verbose_name="伝票日付")
     quantity = models.IntegerField(verbose_name="販売数")
     customer = models.CharField(verbose_name="得意先名", max_length=100, blank=True, null=True)
+    sales_category = models.CharField(verbose_name="区分", max_length=20, blank=True, default='売上')
+    tax_excluded_amount = models.IntegerField(verbose_name="税抜金額", default=0)
+    gross_profit_amount = models.IntegerField(verbose_name="粗利金額", default=0)
     # ★新設：売上データがどちらの会社の実績か
     company = models.CharField(verbose_name="データ所属会社", max_length=20, choices=COMPANY_CHOICES, default='IKUJI')
 

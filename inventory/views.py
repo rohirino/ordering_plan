@@ -7,8 +7,18 @@ from django.views.decorators.http import require_POST
 from django.contrib import messages
 from django.http import HttpResponse
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, Order, ShipmentSchedule, ArrivalSchedule
-from django.db.models import Sum, Case, When, IntegerField, Q
+from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, Order, ShipmentSchedule, ArrivalSchedule, ProductVariant, InventoryState
+from .product_importer import import_uploaded_product_file
+from .sales_importer import import_uploaded_sales_file
+from .valuation_service import (
+    available_inventory_dates,
+    import_inventory_state_master,
+    import_valuation_snapshot,
+    parse_inventory_date,
+    sync_snapshot_to_planning_inventory,
+    valuation_context,
+)
+from django.db.models import Sum, Case, When, IntegerField, Q, Max
 from datetime import timedelta
 
 def _get_csv_reader(uploaded_file):
@@ -29,12 +39,65 @@ def _get_csv_reader(uploaded_file):
         return csv.DictReader(io.StringIO("\n".join(lines[1:])), fieldnames=cleaned_headers)
     return csv.DictReader(io.StringIO(decoded_text))
 
+def _normalize_inventory_product_code(raw_code):
+    digit_code = ''.join(ch for ch in str(raw_code or '') if ch.isdigit())
+    if len(digit_code) >= 10:
+        return digit_code[:7]
+    if digit_code and len(digit_code) < 7:
+        return digit_code.zfill(7)
+    return digit_code or str(raw_code or '').strip()
+
+def _parse_inventory_quantity(value):
+    if value in (None, ''):
+        return 0, False
+    text = str(value).replace(',', '').strip()
+    if not text:
+        return 0, False
+    try:
+        return int(float(text)), False
+    except (ValueError, TypeError):
+        return 0, True
+
+def _normalize_product_code(raw_code):
+    return _normalize_inventory_product_code(raw_code)
+
+def _parse_csv_quantity(value):
+    return _parse_inventory_quantity(value)
+
+def _parse_csv_date(value):
+    text = str(value or '').strip()
+    if not text:
+        return None
+    text = ' '.join(text.split())
+    for fmt in ('%Y/%m/%d', '%Y-%m-%d', '%Y年 %m月 %d日', '%Y年%m月%d日'):
+        try:
+            return datetime.datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+def _build_arrival_map(queryset):
+    arr_map = {}
+    for a in queryset:
+        arr_map.setdefault(a.product_id, {}).setdefault(a.arrival_date, {}).setdefault(a.status, 0)
+        arr_map[a.product_id][a.arrival_date][a.status] += a.quantity
+    return arr_map
+
+def _get_planning_base_date(target_company='IKUJI'):
+    latest_inventory_date = Inventory.objects.filter(
+        product__owner_company=target_company,
+        inventory_date__isnull=False,
+    ).aggregate(latest=Max('inventory_date'))['latest']
+    if latest_inventory_date:
+        return latest_inventory_date + timedelta(days=1)
+    return datetime.date.today()
+
 def _recalculate_abc_ranks(target_company='IKUJI'):
     """【現実的改修】各商品の個別設定「長期トレンド日数」に100%自動連動してABCを評価する"""
-    base_date = datetime.date(2026, 6, 1)
+    base_date = _get_planning_base_date(target_company)
     
     # 1. 会社に所属する全マスタをロード
-    products = Product.objects.filter(owner_company=target_company)
+    products = Product.objects.filter(owner_company=target_company, is_discontinued=False)
     
     # 2. 期間ごとの売上（90, 120, 150, 180日）をデータベースから一括アノテーション取得（高速化）
     sales_summary = SalesHistory.objects.filter(
@@ -135,7 +198,8 @@ def planning_dashboard(request):
     search_query = request.GET.get('search_query', '').strip()
     abc_filter = request.GET.get('abc_filter', '').strip()
     supplier_code = request.GET.get('supplier_code', '').strip()
-    base_date = datetime.date(2026, 6, 1)
+    show_discontinued = request.GET.get('show_discontinued') == '1'
+    base_date = _get_planning_base_date(current_company)
     thirty_days_ago = base_date - timedelta(days=30)
     sixty_days_ago = base_date - timedelta(days=60)
     long_check_date = base_date - timedelta(days=months_val * 30)
@@ -153,6 +217,8 @@ def planning_dashboard(request):
         if item['company'] == 'IKUJI': sales_map_ikuji[item['product_id']] = item
         else: sales_map_select[item['product_id']] = item
     inventories = Inventory.objects.select_related('product').filter(product__is_excluded=False, product__owner_company=current_company).order_by('product__code')
+    if not show_discontinued:
+        inventories = inventories.filter(product__is_discontinued=False)
     if abc_filter in ['A', 'B', 'C', 'DEAD']: inventories = inventories.filter(product__abc_rank=abc_filter)
     if supplier_code: inventories = inventories.filter(product__code__startswith=supplier_code)
     if search_query: inventories = inventories.filter(Q(product__code__icontains=search_query) | Q(product__name__icontains=search_query))
@@ -175,10 +241,7 @@ def planning_dashboard(request):
         ship_map.setdefault(s.product_id, {}).setdefault(s.shipment_date, 0)
         ship_map[s.product_id][s.shipment_date] += s.quantity
     arrivals = ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date)
-    arr_map = {}
-    for a in arrivals:
-        arr_map.setdefault(a.product_id, {}).setdefault(a.arrival_date, {}).setdefault(a.status, 0)
-        arr_map[a.product_id][a.arrival_date][a.status] += a.quantity
+    arr_map = _build_arrival_map(arrivals)
     date_list = [base_date + timedelta(days=i) for i in range(120)]
     all_warehouses = Warehouse.objects.filter(owner_company=current_company)
     wh_inv_records = WarehouseInventory.objects.select_related('warehouse', 'product').filter(Q(warehouse__owner_company=current_company) | Q(warehouse_id__in=shared_wh_ids))
@@ -189,6 +252,8 @@ def planning_dashboard(request):
             cross_company_wh_stock.setdefault(rec.product.code, {})[rec.warehouse_id] = rec.quantity
             cross_company_stock[rec.product.code] = cross_company_stock.get(rec.product.code, 0) + rec.quantity
     all_inventories_for_kpi = Inventory.objects.select_related('product').filter(product__is_excluded=False, product__owner_company=current_company)
+    if not show_discontinued:
+        all_inventories_for_kpi = all_inventories_for_kpi.filter(product__is_discontinued=False)
     for k_item in all_inventories_for_kpi:
         k_pid = k_item.product.id
         k_sales = sales_map_select.get(k_pid, {'sum_30': 0, 'sum_long': 0}) if k_item.product.demand_source == 'SELECT' else sales_map_ikuji.get(k_pid, {'sum_30': 0, 'sum_long': 0})
@@ -212,7 +277,6 @@ def planning_dashboard(request):
         inventory_date_choices.append({'value': m_end.strftime('%Y-%m-%d'), 'display': m_end.strftime('%Y年%m月末')})
         current_target = m_end.replace(day=1)
     active_orders = Order.objects.select_related('product').filter(product__owner_company=current_company).order_by('-created_at')
-    active_arrivals = ArrivalSchedule.objects.select_related('product').filter(product__owner_company=current_company).order_by('arrival_date')
     visible_inventories = []
     for item in page_obj:
         pid = item.product.id; pcode = item.product.code
@@ -258,17 +322,305 @@ def planning_dashboard(request):
             item.status_alert = f"🚨 欠品リスク{suffix}" if has_shortage_risk else f"⚠️ 発注点割れ{suffix}" if has_order_point_risk else f"正常{suffix}"
             item.needs_order = has_shortage_risk or has_order_point_risk
         visible_inventories.append(item)
-    return render(request, 'inventory/dashboard.html', {'inventories': visible_inventories, 'page_obj': page_obj, 'date_list': date_list, 'active_months': active_months, 'search_query': search_query, 'inventory_date_choices': inventory_date_choices, 'active_orders': active_orders, 'active_arrivals': active_arrivals, 'abc_filter': abc_filter, 'supplier_code': supplier_code, 'current_company': current_company, 'active_filter': active_filter, 'all_warehouses': all_warehouses, 'ikuji_warehouses': ikuji_warehouses, 'shared_wh_ids': shared_wh_ids, 'kpi_shortage_cnt': kpi_shortage_cnt, 'kpi_order_point_cnt': kpi_order_point_cnt})
+    return render(request, 'inventory/dashboard.html', {'inventories': visible_inventories, 'page_obj': page_obj, 'date_list': date_list, 'active_months': active_months, 'search_query': search_query, 'inventory_date_choices': inventory_date_choices, 'active_orders': active_orders, 'abc_filter': abc_filter, 'supplier_code': supplier_code, 'show_discontinued': show_discontinued, 'current_company': current_company, 'active_filter': active_filter, 'all_warehouses': all_warehouses, 'ikuji_warehouses': ikuji_warehouses, 'shared_wh_ids': shared_wh_ids, 'kpi_shortage_cnt': kpi_shortage_cnt, 'kpi_order_point_cnt': kpi_order_point_cnt})
+
+def product_master_dashboard(request):
+    current_company = request.GET.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    search_query = request.GET.get('search_query', '').strip()
+    state_search_query = request.GET.get('state_search_query', '').strip()
+    product_prefix = ''.join(ch for ch in request.GET.get('product_prefix', '').strip() if ch.isdigit())[:3]
+    show_discontinued = request.GET.get('show_discontinued') == '1'
+    product_sort = request.GET.get('product_sort', 'code')
+    product_order = request.GET.get('product_order', 'asc')
+    products = Product.objects.filter(owner_company=current_company)
+    if not show_discontinued:
+        products = products.filter(is_discontinued=False)
+    if product_prefix:
+        products = products.filter(code__startswith=product_prefix)
+    if search_query:
+        products = products.filter(Q(code__icontains=search_query) | Q(name__icontains=search_query) | Q(supplier__icontains=search_query))
+    sort_fields = {
+        'code': 'code',
+        'name': 'name',
+        'supplier': 'supplier',
+        'price': 'price',
+        'lead_time': 'lead_time',
+        'order_lot': 'order_lot',
+        'safety_stock': 'inventory__safety_stock',
+        'trend_days': 'trend_days',
+        'demand_source': 'demand_source',
+        'source': 'created_from_valuation',
+        'discontinued': 'is_discontinued',
+    }
+    sort_field = sort_fields.get(product_sort, 'code')
+    if product_order == 'desc':
+        sort_field = '-' + sort_field
+    products = products.order_by(sort_field, 'code')
+    paginator = Paginator(products, 100)
+    page_number = request.GET.get('page', 1)
+    try:
+        page_obj = paginator.page(page_number)
+    except PageNotAnInteger:
+        page_obj = paginator.page(1)
+    except EmptyPage:
+        page_obj = paginator.page(paginator.num_pages)
+    product_rows = []
+    for product in page_obj:
+        inventory, _ = Inventory.objects.get_or_create(product=product)
+        product.safety_stock = inventory.safety_stock
+        product_rows.append(product)
+    inventory_states = InventoryState.objects.all().order_by('state_code')
+    if state_search_query:
+        inventory_states = inventory_states.filter(
+            Q(state_code__icontains=state_search_query) | Q(state_name__icontains=state_search_query)
+        )
+    return render(request, 'inventory/product_master_dashboard.html', {
+        'current_company': current_company,
+        'search_query': search_query,
+        'state_search_query': state_search_query,
+        'product_prefix': product_prefix,
+        'show_discontinued': show_discontinued,
+        'products': product_rows,
+        'inventory_states': inventory_states[:80],
+        'inventory_state_count': inventory_states.count(),
+        'page_obj': page_obj,
+        'product_sort': product_sort,
+        'product_order': product_order,
+        'lot_rule_choices': Product.LOT_RULE_CHOICES,
+        'trend_days_choices': Product.TREND_DAYS_CHOICES,
+        'company_choices': Product.COMPANY_CHOICES,
+    })
+
+def arrivals_dashboard(request):
+    current_company = request.GET.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    search_query = request.GET.get('search_query', '').strip()
+    arrivals = ArrivalSchedule.objects.select_related('product').filter(product__owner_company=current_company).order_by('arrival_date', 'product__code', 'status')
+    if search_query:
+        arrivals = arrivals.filter(Q(product__code__icontains=search_query) | Q(product__name__icontains=search_query))
+    paginator = Paginator(arrivals, 100)
+    page_number = request.GET.get('page', 1)
+    try:
+        page_obj = paginator.page(page_number)
+    except PageNotAnInteger:
+        page_obj = paginator.page(1)
+    except EmptyPage:
+        page_obj = paginator.page(paginator.num_pages)
+    return render(request, 'inventory/arrivals_dashboard.html', {
+        'current_company': current_company,
+        'search_query': search_query,
+        'arrivals': page_obj,
+        'page_obj': page_obj,
+        'status_choices': ArrivalSchedule.STATUS_CHOICES,
+    })
+
+def sales_history_dashboard(request):
+    current_company = request.GET.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    search_query = request.GET.get('search_query', '').strip()
+    product_prefix = ''.join(ch for ch in request.GET.get('product_prefix', '').strip() if ch.isdigit())[:3]
+    sales_category = request.GET.get('sales_category', '').strip()
+    date_from = request.GET.get('date_from', '').strip()
+    date_to = request.GET.get('date_to', '').strip()
+    sales = SalesHistory.objects.select_related('product').filter(company=current_company).order_by(
+        '-sold_date', 'customer', 'product__code', 'sales_category'
+    )
+    if search_query:
+        sales = sales.filter(
+            Q(product__code__icontains=search_query)
+            | Q(product__name__icontains=search_query)
+            | Q(customer__icontains=search_query)
+        )
+    if product_prefix:
+        sales = sales.filter(product__code__startswith=product_prefix)
+    if sales_category:
+        sales = sales.filter(sales_category=sales_category)
+    parsed_from = _parse_csv_date(date_from)
+    parsed_to = _parse_csv_date(date_to)
+    if parsed_from:
+        sales = sales.filter(sold_date__gte=parsed_from)
+    if parsed_to:
+        sales = sales.filter(sold_date__lte=parsed_to)
+    totals = sales.aggregate(
+        quantity=Sum('quantity'),
+        tax_excluded_amount=Sum('tax_excluded_amount'),
+        gross_profit_amount=Sum('gross_profit_amount'),
+    )
+    categories = list(
+        SalesHistory.objects.filter(company=current_company)
+        .exclude(sales_category='')
+        .values_list('sales_category', flat=True)
+        .distinct()
+        .order_by('sales_category')
+    )
+    paginator = Paginator(sales, 100)
+    page_number = request.GET.get('page', 1)
+    try:
+        page_obj = paginator.page(page_number)
+    except PageNotAnInteger:
+        page_obj = paginator.page(1)
+    except EmptyPage:
+        page_obj = paginator.page(paginator.num_pages)
+    return render(request, 'inventory/sales_history_dashboard.html', {
+        'current_company': current_company,
+        'search_query': search_query,
+        'product_prefix': product_prefix,
+        'sales_category': sales_category,
+        'date_from': date_from,
+        'date_to': date_to,
+        'categories': categories,
+        'sales': page_obj,
+        'page_obj': page_obj,
+        'totals': totals,
+    })
+
+def _filter_valuation_variant_rows(variant_rows, params):
+    variant_rows = list(variant_rows)
+    variant_total_count = len(variant_rows)
+    state_code_filter = params.get('state_code', '').strip()
+    state_name_filter = params.get('state_name', '').strip()
+    planning_filter = params.get('planning_filter', '').strip()
+    variant_sort = params.get('variant_sort', 'product_code')
+    variant_order = params.get('variant_order', 'asc')
+    if state_code_filter:
+        variant_rows = [row for row in variant_rows if state_code_filter in row['product_variant__state_code']]
+    if state_name_filter:
+        variant_rows = [row for row in variant_rows if state_name_filter in (row['product_variant__state_name'] or '')]
+    if planning_filter == 'included':
+        variant_rows = [row for row in variant_rows if row['product_variant__include_in_planning_inventory']]
+    elif planning_filter == 'excluded':
+        variant_rows = [row for row in variant_rows if not row['product_variant__include_in_planning_inventory']]
+    sort_fields = {
+        'product_code': 'product_variant__product__code',
+        'product_name': 'product_variant__product__name',
+        'state_code': 'product_variant__state_code',
+        'state_name': 'product_variant__state_name',
+        'planning': 'product_variant__include_in_planning_inventory',
+        'unit_cost': 'unit_cost',
+        'quantity': 'quantity',
+        'amount': 'amount',
+    }
+    sort_key = sort_fields.get(variant_sort, 'product_variant__product__code')
+    variant_rows.sort(key=lambda row: (row.get(sort_key) is None, row.get(sort_key)), reverse=(variant_order == 'desc'))
+    return variant_rows, {
+        'state_code_filter': state_code_filter,
+        'state_name_filter': state_name_filter,
+        'planning_filter': planning_filter,
+        'variant_sort': variant_sort,
+        'variant_order': variant_order,
+        'variant_total_count': variant_total_count,
+        'variant_filtered_count': len(variant_rows),
+    }
+
+def valuation_dashboard(request):
+    current_company = request.GET.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']: current_company = 'IKUJI'
+    selected_date = parse_inventory_date(request.GET.get('inventory_date'), current_company)
+    ctx = valuation_context(selected_date, current_company)
+    variant_rows, variant_filter_context = _filter_valuation_variant_rows(ctx['variant_summary'], request.GET)
+    ctx['variant_summary'] = variant_rows
+    ctx.update({
+        'current_company': current_company,
+        'selected_date': selected_date,
+        'available_dates': available_inventory_dates(current_company),
+    })
+    ctx.update(variant_filter_context)
+    return render(request, 'inventory/valuation_dashboard.html', ctx)
+
+@require_POST
+def create_product(request):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    try:
+        code = _normalize_product_code(request.POST.get('code') or request.POST.get('product_code'))
+        if not code:
+            messages.error(request, "商品コードを入力してください。")
+            return redirect(request.META.get('HTTP_REFERER', f'/product-master/?current_company={current_company}'))
+        if Product.objects.filter(code=code).exists():
+            messages.error(request, f"商品コードは既に登録されています: {code}")
+            return redirect(request.META.get('HTTP_REFERER', f'/product-master/?current_company={current_company}'))
+        product = Product.objects.create(
+            code=code,
+            name=(request.POST.get('name') or '商品名未設定').strip(),
+            owner_company=current_company,
+            demand_source=request.POST.get('demand_source', current_company),
+            price=int(request.POST.get('price') or 0),
+            supplier=(request.POST.get('supplier') or '').strip(),
+            lead_time=int(request.POST.get('lead_time') or 30),
+            order_lot=int(request.POST.get('order_lot') or 1),
+            lot_rule=request.POST.get('lot_rule', 'ROUND_UP_LOT'),
+            trend_days=int(request.POST.get('trend_days') or 90),
+            is_excluded='is_excluded' in request.POST,
+            is_discontinued='is_discontinued' in request.POST,
+            allow_dead_order='allow_dead_order' in request.POST,
+        )
+        Inventory.objects.create(product=product, safety_stock=int(request.POST.get('safety_stock') or 20))
+        _recalculate_abc_ranks(current_company)
+        messages.success(request, f"商品を登録しました: {code}")
+    except Exception as e:
+        messages.error(request, f"商品登録エラー: {e}")
+    return redirect(request.META.get('HTTP_REFERER', f'/product-master/?current_company={current_company}'))
+
+@require_POST
+def update_product_variant_planning_flag(request, variant_id):
+    variant = get_object_or_404(ProductVariant, id=variant_id)
+    variant.include_in_planning_inventory = 'include_in_planning_inventory' in request.POST
+    variant.save(update_fields=['include_in_planning_inventory'])
+    messages.success(
+        request,
+        f"状態SKU［{variant.product.code}-{variant.state_code}］の発注計画反映設定を更新しました。"
+    )
+    return redirect(request.META.get('HTTP_REFERER', 'valuation_dashboard'))
+
+@require_POST
+def bulk_update_product_variant_planning_flags(request):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    selected_date = parse_inventory_date(request.POST.get('inventory_date'), current_company)
+    ctx = valuation_context(selected_date, current_company)
+    variant_rows, _ = _filter_valuation_variant_rows(ctx['variant_summary'], request.POST)
+    variant_ids = [row['product_variant_id'] for row in variant_rows if row.get('product_variant_id')]
+    include_value = request.POST.get('bulk_action') == 'include'
+    updated_count = 0
+    if variant_ids:
+        updated_count = ProductVariant.objects.filter(id__in=variant_ids).update(
+            include_in_planning_inventory=include_value
+        )
+    action_label = '含める' if include_value else '除外'
+    messages.success(request, f"表示中の状態SKU {updated_count} 件を発注計画反映「{action_label}」に更新しました。")
+    redirect_url = (
+        f"/valuation/?current_company={current_company}"
+        f"&inventory_date={selected_date:%Y-%m-%d}"
+        f"&state_code={request.POST.get('state_code', '')}"
+        f"&state_name={request.POST.get('state_name', '')}"
+        f"&planning_filter={request.POST.get('planning_filter', '')}"
+        f"&variant_sort={request.POST.get('variant_sort', 'product_code')}"
+        f"&variant_order={request.POST.get('variant_order', 'asc')}"
+    )
+    return redirect(redirect_url)
 
 @require_POST
 def update_product_config(request, product_id):
     product = get_object_or_404(Product, id=product_id)
     try:
+        if 'name' in request.POST:
+            product.name = (request.POST.get('name') or product.name).strip()
+        if 'price' in request.POST:
+            product.price = int(request.POST.get('price') or 0)
+        if 'supplier' in request.POST:
+            product.supplier = (request.POST.get('supplier') or '').strip()
         product.lead_time = int(request.POST.get('lead_time', '30'))
         product.order_lot = int(request.POST.get('order_lot', '1'))
         product.lot_rule = request.POST.get('lot_rule', 'ROUND_UP_LOT')
         product.trend_days = int(request.POST.get('trend_days', '90'))
         product.is_excluded = 'is_excluded' in request.POST
+        product.is_discontinued = 'is_discontinued' in request.POST
         product.allow_dead_order = 'allow_dead_order' in request.POST
         product.demand_source = request.POST.get('demand_source', product.owner_company)
         product.save()
@@ -276,14 +628,139 @@ def update_product_config(request, product_id):
         inventory.safety_stock = int(request.POST.get('safety_stock', '20'))
         inventory.save()
         _recalculate_abc_ranks(product.owner_company)
-        messages.success(request, "商品設定を即時更新しました！")
+        messages.success(request, "A版発注設定を即時更新しました！")
     except Exception as e: messages.error(request, f"更新エラー: {e}")
     return redirect(request.META.get('HTTP_REFERER', 'planning_dashboard'))
+
+@require_POST
+def bulk_update_products(request):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    product_ids = [pid for pid in request.POST.getlist('product_ids') if str(pid).isdigit()]
+    products = Product.objects.filter(id__in=product_ids, owner_company=current_company)
+    update_fields = []
+    try:
+        if not product_ids:
+            messages.error(request, "一括更新する商品にチェックを入れてください。")
+            return redirect(request.META.get('HTTP_REFERER', f'/product-master/?current_company={current_company}'))
+
+        product_updates = {}
+        if 'bulk_lead_time_enabled' in request.POST:
+            product_updates['lead_time'] = int(request.POST.get('bulk_lead_time') or 0)
+            update_fields.append('LT')
+        if 'bulk_order_lot_enabled' in request.POST:
+            product_updates['order_lot'] = max(1, int(request.POST.get('bulk_order_lot') or 1))
+            update_fields.append('ロット')
+        if 'bulk_trend_days_enabled' in request.POST:
+            product_updates['trend_days'] = int(request.POST.get('bulk_trend_days') or 90)
+            update_fields.append('長期ベース')
+        if 'bulk_lot_rule_enabled' in request.POST:
+            product_updates['lot_rule'] = request.POST.get('bulk_lot_rule', 'ROUND_UP_LOT')
+            update_fields.append('超過ルール')
+        if 'bulk_demand_source_enabled' in request.POST:
+            product_updates['demand_source'] = request.POST.get('bulk_demand_source', current_company)
+            update_fields.append('需要参照元')
+        if 'bulk_is_excluded_enabled' in request.POST:
+            product_updates['is_excluded'] = request.POST.get('bulk_is_excluded') == 'true'
+            update_fields.append('管理外')
+        if 'bulk_is_discontinued_enabled' in request.POST:
+            product_updates['is_discontinued'] = request.POST.get('bulk_is_discontinued') == 'true'
+            update_fields.append('廃盤')
+        if 'bulk_allow_dead_order_enabled' in request.POST:
+            product_updates['allow_dead_order'] = request.POST.get('bulk_allow_dead_order') == 'true'
+            update_fields.append('処分品発注')
+
+        safety_stock_enabled = 'bulk_safety_stock_enabled' in request.POST
+        if not product_updates and not safety_stock_enabled:
+            messages.error(request, "一括更新する項目にチェックを入れてください。")
+            return redirect(request.META.get('HTTP_REFERER', f'/product-master/?current_company={current_company}'))
+
+        updated_count = products.update(**product_updates) if product_updates else products.count()
+
+        if safety_stock_enabled:
+            safety_stock = int(request.POST.get('bulk_safety_stock') or 0)
+            for product in products:
+                inventory, _ = Inventory.objects.get_or_create(product=product)
+                inventory.safety_stock = safety_stock
+                inventory.save(update_fields=['safety_stock', 'updated_at'])
+            update_fields.append('安全在庫')
+
+        _recalculate_abc_ranks(current_company)
+        messages.success(request, f"チェックした商品 {updated_count} 件を一括更新しました（{', '.join(update_fields)}）。")
+    except Exception as e:
+        messages.error(request, f"一括更新エラー: {e}")
+    return redirect(request.META.get('HTTP_REFERER', f'/product-master/?current_company={current_company}'))
+
+def _normalize_state_code(raw_code):
+    digit_code = ''.join(ch for ch in str(raw_code or '') if ch.isdigit())
+    if not digit_code:
+        return ''
+    return digit_code[-3:].zfill(3)
+
+@require_POST
+def create_inventory_state(request):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    state_code = _normalize_state_code(request.POST.get('state_code'))
+    state_name = (request.POST.get('state_name') or '').strip()
+    if not state_code or not state_name:
+        messages.error(request, "状態コードと状態名を入力してください。")
+        return redirect(request.META.get('HTTP_REFERER', f'/product-master/?current_company={current_company}'))
+    InventoryState.objects.update_or_create(
+        state_code=state_code,
+        defaults={'state_name': state_name},
+    )
+    updated_variants = ProductVariant.objects.filter(state_code=state_code).update(state_name=state_name)
+    messages.success(request, f"状態コード {state_code} を登録/更新しました。状態別SKU更新: {updated_variants}件")
+    return redirect(request.META.get('HTTP_REFERER', f'/product-master/?current_company={current_company}'))
+
+@require_POST
+def update_inventory_state(request, state_id):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    state = get_object_or_404(InventoryState, id=state_id)
+    state_name = (request.POST.get('state_name') or '').strip()
+    if not state_name:
+        messages.error(request, "状態名を入力してください。")
+        return redirect(request.META.get('HTTP_REFERER', f'/product-master/?current_company={current_company}'))
+    state.state_name = state_name
+    state.save(update_fields=['state_name'])
+    updated_variants = ProductVariant.objects.filter(state_code=state.state_code).update(state_name=state_name)
+    messages.success(request, f"状態コード {state.state_code} を更新しました。状態別SKU更新: {updated_variants}件")
+    return redirect(request.META.get('HTTP_REFERER', f'/product-master/?current_company={current_company}'))
 
 @require_POST
 def delete_product(request, product_id):
     get_object_or_404(Product, id=product_id).delete()
     return redirect(request.META.get('HTTP_REFERER', 'planning_dashboard'))
+
+@require_POST
+def create_arrival_schedule(request):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    try:
+        code = _normalize_product_code(request.POST.get('商品コード') or request.POST.get('product_code'))
+        product = Product.objects.get(code=code, owner_company=current_company)
+        arrival_date = _parse_csv_date(request.POST.get('arrival_date'))
+        quantity, quantity_error = _parse_csv_quantity(request.POST.get('quantity'))
+        status = request.POST.get('status', '確定')
+        if status not in ['確定', '高確度', '希望']:
+            status = '確定'
+        if not arrival_date or quantity_error:
+            messages.error(request, "入荷予定日または数量を確認してください。")
+            return redirect(request.META.get('HTTP_REFERER', '/?current_company=' + current_company))
+
+        arrival, created = ArrivalSchedule.objects.update_or_create(
+            product=product,
+            arrival_date=arrival_date,
+            status=status,
+            defaults={'quantity': quantity},
+        )
+        action = "追加" if created else "上書き更新"
+        messages.success(request, f"入荷予定を{action}しました。")
+    except Product.DoesNotExist:
+        messages.error(request, f"商品コードが見つかりません: {request.POST.get('商品コード') or request.POST.get('product_code')}")
+    except Exception as e:
+        messages.error(request, f"入荷予定追加エラー: {e}")
+    return redirect(request.META.get('HTTP_REFERER', '/?current_company=' + current_company))
 
 @require_POST
 def update_arrival_schedule(request, arrival_id):
@@ -304,14 +781,14 @@ def delete_arrival_schedule(request, arrival_id):
 @require_POST
 def create_order_plan(request, product_id):
     product = get_object_or_404(Product, id=product_id); inventory = Inventory.objects.get(product=product)
-    base_date = datetime.date(2026, 6, 1); future_end_date = base_date + timedelta(days=120)
+    base_date = _get_planning_base_date(product.owner_company); future_end_date = base_date + timedelta(days=120)
     sales_summary = SalesHistory.objects.filter(sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(sum_30=Sum(Case(When(sold_date__gte=base_date-timedelta(days=30), then='quantity'), default=0, output_field=IntegerField())), sum_long=Sum(Case(When(sold_date__gte=base_date-timedelta(days=product.trend_days), then='quantity'), default=0, output_field=IntegerField())))
     s_map_ikuji, s_map_select = {}, {}
     for item in sales_summary:
         if item['company'] == 'IKUJI': s_map_ikuji[item['product_id']] = item
         else: s_map_select[item['product_id']] = item
     ship_map = {s['product_id']: {s['shipment_date']: s['total']} for s in ShipmentSchedule.objects.filter(shipment_date__gte=base_date, shipment_date__lte=future_end_date).values('product_id', 'shipment_date').annotate(total=Sum('quantity'))}
-    arr_map = {a['product_id']: {a['arrival_date']: {a['status']: a['total']}} for a in ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date).values('product_id', 'arrival_date', 'status').annotate(total=Sum('quantity'))}
+    arr_map = _build_arrival_map(ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date))
     if _execute_single_order_plan(product, inventory, base_date, future_end_date, s_map_select, s_map_ikuji, ship_map, arr_map): messages.success(request, f"商品［{product.code}］の発注計画を作成しました。")
     else: messages.info(request, "発注基準を満たしていないためスキップしました。")
     return redirect(request.META.get('HTTP_REFERER', 'planning_dashboard'))
@@ -322,7 +799,7 @@ def bulk_create_order_plan(request):
     if not selected_pids:
         messages.warning(request, "商品が選択されていません。")
         return redirect('/?current_company=' + current_company)
-    base_date = datetime.date(2026, 6, 1); future_end_date = base_date + timedelta(days=120)
+    base_date = _get_planning_base_date(current_company); future_end_date = base_date + timedelta(days=120)
     sales_summary = SalesHistory.objects.filter(sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(sum_30=Sum(Case(When(sold_date__gte=base_date-timedelta(days=30), then='quantity'), default=0, output_field=IntegerField())), sum_long=Sum(Case(When(sold_date__gte=base_date-timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())))
     s_map_ikuji, s_map_select = {}, {}
     for item in sales_summary:
@@ -330,7 +807,7 @@ def bulk_create_order_plan(request):
         else: s_map_select[item['product_id']] = item
     ship_map, arr_map = {}, {}
     for s in ShipmentSchedule.objects.filter(shipment_date__gte=base_date, shipment_date__lte=future_end_date): ship_map.setdefault(s.product_id, {})[s.shipment_date] = ship_map.setdefault(s.product_id, {}).get(s.shipment_date, 0) + s.quantity
-    for a in ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date): arr_map.setdefault(a.product_id, {}).setdefault(a.arrival_date, {})[a.status] = arr_map.setdefault(a.product_id, {}).setdefault(a.arrival_date, {}).get(a.status, 0) + a.quantity
+    arr_map = _build_arrival_map(ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date))
     products = Product.objects.filter(id__in=selected_pids); inventories = {inv.product_id: inv for inv in Inventory.objects.filter(product_id__in=selected_pids)}
     success_cnt = 0
     for p in products:
@@ -350,7 +827,11 @@ def delete_order_plan(request, order_id):
     get_object_or_404(Order, id=order_id).delete()
     return redirect(request.META.get('HTTP_REFERER', 'planning_dashboard'))
 
-def operation_guide(request): return render(request, 'inventory/guide.html')
+def operation_guide(request):
+    current_company = request.GET.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    return render(request, 'inventory/guide.html', {'current_company': current_company})
 
 def import_inventory_csv(request):
     current_company = request.POST.get('current_company', 'IKUJI')
@@ -358,25 +839,36 @@ def import_inventory_csv(request):
         try:
             reader = _get_csv_reader(request.FILES['csv_file']); headers = reader.fieldnames
             if not headers or '商品コード' not in headers: return redirect('/?current_company=' + current_company)
-            wh_map = {wh_name: Warehouse.objects.get_or_create(name=wh_name, owner_company=current_company, defaults={'is_transit': "移動中" in wh_name})[0] for wh_name in headers if wh_name != '商品コード'}
+            warehouse_headers = [wh_name for wh_name in headers if wh_name != '商品コード']
+            wh_map = {wh_name: Warehouse.objects.get_or_create(name=wh_name, owner_company=current_company, defaults={'is_transit': "移動中" in wh_name})[0] for wh_name in warehouse_headers}
             products = {p.code: p for p in Product.objects.filter(owner_company=current_company)}
             try: selected_date = datetime.datetime.strptime(request.POST.get('inventory_date', ''), '%Y-%m-%d').date()
-            except: selected_date = datetime.date(2026, 5, 31)
-            row_count = 0
+            except: selected_date = datetime.date.today()
+            row_count, unknown_count, quantity_error_count = 0, 0, 0
+            seen_codes = set()
             for row in reader:
-                code = str(row.get('商品コード', '')).strip()
-                if code.isdigit() and len(code) < 7: code = code.zfill(7)
-                if code not in products: continue
+                code = _normalize_inventory_product_code(row.get('商品コード', ''))
+                if not code: continue
+                if code not in products:
+                    unknown_count += 1
+                    continue
+                seen_codes.add(code)
                 p_obj, tot = products[code], 0
+                WarehouseInventory.objects.filter(product=p_obj, warehouse__owner_company=current_company).delete()
                 for w_name, w_obj in wh_map.items():
-                    try: qty = int(float(row.get(w_name, '0')))
-                    except: qty = 0
-                    WarehouseInventory.objects.update_or_create(product=p_obj, warehouse=w_obj, defaults={'quantity': qty})
+                    qty, had_error = _parse_inventory_quantity(row.get(w_name, '0'))
+                    if had_error: quantity_error_count += 1
+                    WarehouseInventory.objects.create(product=p_obj, warehouse=w_obj, quantity=qty)
                     tot += qty
                 Inventory.objects.update_or_create(product=p_obj, defaults={'current_quantity': tot, 'inventory_date': selected_date})
                 row_count += 1
             _recalculate_abc_ranks(current_company)
-            messages.success(request, f"実在庫を上書き補正し再評価しました！ ({row_count}件)")
+            unchanged_count = max(len(products) - len(seen_codes), 0)
+            messages.success(
+                request,
+                f"実在庫を商品単位で洗替し再評価しました！ "
+                f"(更新: {row_count}件 / 未更新: {unchanged_count}件 / 商品未登録: {unknown_count}件 / 数量エラー: {quantity_error_count}件)"
+            )
         except Exception as e: messages.error(request, f"エラー: {e}")
     return redirect('/?current_company=' + current_company)
 
@@ -389,8 +881,19 @@ def download_csv_template(request, template_type):
         content = f"商品コード,{cols}\n{scode},{','.join(['0']*ccnt)}\n"
     else:
         templates = {
-            'products': "商品コード,商品名,リードタイム,発注ロット,超過時ルール,長期トレンド日数,管理外フラグ\n0040006,サンプル商品名称,90,100,ROUND_UP_LOT,90,FALSE\n",
-            'sales': f"伝票日付,得意先コード,商品コード,状態コード,合計 / 粗利,合計 / 税抜,合計 / 数量\n2026/06/01,000013,{scode},001,3300,7920,6\n",
+            'products': (
+                "共通商品・A版発注設定一覧表,雛形\n"
+                "《コード順》\n"
+                "コード,JANｺｰﾄﾞ(1),商品名,分類,分類,分類グループ,分類グループ,固定原価,容量,関税,仕入先,廃盤フラグ\n"
+                ",,,,,,,,,,,\n"
+                f"{scode}001,,サンプル商品名称,000,サンプル分類,00,サンプル分類グループ,1000,  0.0000,  0.0 %,000001,FALSE\n"
+            ),
+            'sales': (
+                "\"売上明細表,雛形\",,,,,,,,,\n"
+                "\"【日付期間：2026年 6月 1日 ～ 2026年 6月 1日】\",,,,,,,,,\n"
+                "コード,得意先名,伝票日付,区分,仕入先,コード,商品名,数量,税抜金額,粗利金額\n"
+                f"000013,サンプル得意先,2026年 6月 1日,売上,000001,{scode}001,サンプル商品名称,6,7920,3300\n"
+            ),
             'arrivals': f"商品コード,入荷予定日,入荷予定数量,確度ステータス\n{scode},2026/06/15,100,確定\n"
         }
         content = templates.get(template_type, "")
@@ -401,63 +904,29 @@ def import_products_csv(request):
     current_company = request.POST.get('current_company', 'IKUJI')
     if request.method == 'POST' and request.FILES.get('csv_file'):
         try:
-            reader = _get_csv_reader(request.FILES['csv_file']); row_count = 0
-            for row in reader:
-                code = str(row.get('商品コード', '')).strip()
-                if not code or code.startswith('field_') or code.lower() == 'none': continue
-                if code.isdigit() and len(code) < 7: code = code.zfill(7)
-                try: lt = int(float(row.get('リードタイム', '30')))
-                except: lt = 30
-                try: lot = int(float(row.get('発注ロット', '1')))
-                except: lot = 1
-                rule = row.get('超過時ルール', 'ROUND_UP_LOT').strip()
-                if rule not in ['ROUND_UP_LOT', 'MIN_LOT_ONLY']: rule = 'ROUND_UP_LOT'
-                try: tdays = int(float(row.get('長期トレンド日数', '90')))
-                except: tdays = 90
-                exc = row.get('管理外フラグ', 'FALSE').strip().upper() == 'TRUE'
-                p, _ = Product.objects.update_or_create(code=code, defaults={'name': row.get('商品名', '名称未設定'), 'price': 0, 'supplier': '仕入先未設定', 'lead_time': lt, 'order_lot': lot, 'lot_rule': rule, 'trend_days': tdays, 'is_excluded': exc, 'owner_company': current_company, 'demand_source': current_company})
-                Inventory.objects.get_or_create(product=p, defaults={'current_quantity': 0, 'safety_stock': 20, 'inventory_date': datetime.date(2026, 5, 31)})
-                row_count += 1
+            stats = import_uploaded_product_file(request.FILES['csv_file'], current_company=current_company)
             _recalculate_abc_ranks(current_company)
-            messages.success(request, f"商品マスタ登録完了！（{row_count}件）")
+            messages.success(
+                request,
+                f"共通商品・A版発注設定の登録完了！ 取込対象: {stats['imported']}件 / "
+                f"状態違い重複スキップ: {stats['duplicate_variants']}件 / "
+                f"その他スキップ: {stats['skipped']}件"
+            )
         except Exception as e: messages.error(request, f"エラー: {e}")
-    return redirect('/?current_company=' + current_company)
+    return redirect(request.META.get('HTTP_REFERER', '/product-master/?current_company=' + current_company))
 
 def import_sales_csv(request):
     current_company = request.POST.get('current_company', 'IKUJI')
     if request.method == 'POST' and request.FILES.get('csv_file'):
         try:
-            rows = list(_get_csv_reader(request.FILES['csv_file']))
-            if not rows: return redirect('/?current_company=' + current_company)
-            product_dict = {p.code: p for p in Product.objects.all()}
-            date_set, parsed_rows = set(), []
-            for row in rows:
-                if row.get('伝票日付', '').startswith('field_'): continue
-                code = str(row.get('商品コード', '')).strip()
-                if code.isdigit() and len(code) < 7: code = code.zfill(7)
-                if code not in product_dict: continue
-                try:
-                    rd = row['伝票日付'].split()[0]
-                    sd = datetime.datetime.strptime(rd, '%Y/%m/%d').date() if '/' in rd else datetime.datetime.strptime(rd, '%Y-%m-%d').date()
-                    qty = int(float(row['合計 / 数量']))
-                except: continue
-                date_set.add(sd)
-                parsed_rows.append({'sold_date': sd, 'product': product_dict[code], 'code': code, 'quantity': qty, 'customer': row.get('得意先コード', '').strip()})
-            existing_sales = {}
-            if date_set:
-                for sh in SalesHistory.objects.filter(company=current_company, sold_date__in=date_set).select_related('product'): existing_sales[(sh.sold_date, sh.product.code, sh.customer)] = sh
-            create_list, update_list = [], []
-            for r in parsed_rows:
-                key = (r['sold_date'], r['code'], r['customer'])
-                if key in existing_sales:
-                    sh_obj = existing_sales[key]
-                    if sh_obj.quantity != r['quantity']:
-                        sh_obj.quantity = r['quantity']; update_list.append(sh_obj)
-                else: create_list.append(SalesHistory(sales_id=None, product=r['product'], sold_date=r['sold_date'], quantity=r['quantity'], customer=r['customer'], company=current_company))
-            if create_list: SalesHistory.objects.bulk_create(create_list)
-            if update_list: SalesHistory.objects.bulk_update(update_list, ['quantity'])
+            stats = import_uploaded_sales_file(request.FILES['csv_file'], current_company=current_company)
             _recalculate_abc_ranks(current_company)
-            messages.success(request, f"販売履歴の差分更新完了（新規: {len(create_list)}件 / 更新: {len(update_list)}件）")
+            messages.success(
+                request,
+                f"販売履歴の集計更新完了（集計行: {stats['aggregated']}件 / "
+                f"新規: {stats['created']}件 / 更新: {stats['updated']}件 / "
+                f"商品未登録スキップ: {stats['missing_products']}件）"
+            )
         except Exception as e: messages.error(request, f"エラー: {e}")
     return redirect('/?current_company=' + current_company)
 
@@ -465,30 +934,59 @@ def import_arrivals_csv(request):
     current_company = request.POST.get('current_company', 'IKUJI')
     if request.method == 'POST' and request.FILES.get('csv_file'):
         try:
-            ArrivalSchedule.objects.filter(product__owner_company=current_company).delete()
-            reader = _get_csv_reader(request.FILES['csv_file']); p_dict = {p.code: p for p in Product.objects.filter(owner_company=current_company)}; row_count = 0
+            reader = _get_csv_reader(request.FILES['csv_file']); p_dict = {p.code: p for p in Product.objects.filter(owner_company=current_company)}
+            aggregated = {}
+            unknown_count, error_count, status_fixed_count = 0, 0, 0
             for row in reader:
-                code = str(row.get('商品コード', '')).strip()
-                if code.isdigit() and len(code) < 7: code = code.zfill(7)
-                if code not in p_dict: continue
+                code = _normalize_product_code(row.get('商品コード', ''))
+                if not code: continue
+                if code not in p_dict:
+                    unknown_count += 1
+                    continue
                 dk = '入荷予定日' if '入荷予定日' in row else '予定日'; qk = '入荷予定数量' if '入荷予定数量' in row else '入荷数量'
-                try:
-                    rd = row[dk].split()[0]
-                    ad = datetime.datetime.strptime(rd, '%Y/%m/%d').date() if '/' in rd else datetime.datetime.strptime(rd, '%Y-%m-%d').date()
-                    qty = int(float(row[qk]))
-                except: continue
-                ArrivalSchedule.objects.create(product=p_dict[code], arrival_date=ad, quantity=qty, status=row.get('確度ステータス', '確定') if row.get('確度ステータス') in ['確定','高確度','希望'] else '確定')
-                row_count += 1
-            messages.success(request, f"入荷予定を洗替更新しました！（{row_count}件）")
+                ad = _parse_csv_date(row.get(dk))
+                qty, quantity_error = _parse_csv_quantity(row.get(qk))
+                if not ad or quantity_error:
+                    error_count += 1
+                    continue
+                raw_status = str(row.get('確度ステータス', '確定')).strip()
+                if raw_status in ['確定', '高確度', '希望']:
+                    status = raw_status
+                else:
+                    status = '確定'
+                    status_fixed_count += 1
+                key = (code, ad, status)
+                aggregated[key] = aggregated.get(key, 0) + qty
+
+            if not aggregated:
+                messages.error(
+                    request,
+                    f"有効な入荷予定がありません。既存データは変更していません。"
+                    f"（商品未登録: {unknown_count}件 / 日付数量エラー: {error_count}件）"
+                )
+                return redirect(request.META.get('HTTP_REFERER', '/arrivals/?current_company=' + current_company))
+
+            ArrivalSchedule.objects.filter(product__owner_company=current_company).delete()
+            create_list = [
+                ArrivalSchedule(product=p_dict[code], arrival_date=ad, quantity=qty, status=status)
+                for (code, ad, status), qty in aggregated.items()
+            ]
+            ArrivalSchedule.objects.bulk_create(create_list)
+            messages.success(
+                request,
+                f"入荷予定を集計して洗替更新しました！"
+                f"（登録: {len(create_list)}件 / 商品未登録: {unknown_count}件 / "
+                f"日付数量エラー: {error_count}件 / ステータス補正: {status_fixed_count}件）"
+            )
         except Exception as e: messages.error(request, f"エラー: {e}")
-    return redirect('/?current_company=' + current_company)
+    return redirect(request.META.get('HTTP_REFERER', '/arrivals/?current_company=' + current_company))
 
 def product_list(request): return render(request, 'inventory/product_list.html', {'products': Product.objects.all().order_by('code')})
 
 def export_products_csv(request):
     cc = request.GET.get('current_company', 'IKUJI'); res = HttpResponse(content_type='text/csv'); res['Content-Disposition'] = f'attachment; filename="products_{cc}.csv"'
-    buf = io.StringIO(); writer = csv.writer(buf); writer.writerow(['商品コード', '商品名', '標準原価', '仕入先名', 'リードタイム', '発注ロット', '超過時ルール', '長期トレンド日数', '管理外フラグ'])
-    for p in Product.objects.filter(owner_company=cc): writer.writerow([p.code, p.name, p.price, p.supplier, p.lead_time, p.order_lot, p.lot_rule, p.trend_days, p.is_excluded])
+    buf = io.StringIO(); writer = csv.writer(buf); writer.writerow(['商品コード', '商品名', '標準原価', '仕入先名', 'リードタイム', '発注ロット', '超過時ルール', '長期トレンド日数', '管理外フラグ', '廃盤フラグ'])
+    for p in Product.objects.filter(owner_company=cc): writer.writerow([p.code, p.name, p.price, p.supplier, p.lead_time, p.order_lot, p.lot_rule, p.trend_days, p.is_excluded, p.is_discontinued])
     res.write(buf.getvalue().encode('cp932', errors='replace')); return res
 
 def export_inventory_csv(request):
@@ -505,8 +1003,8 @@ def export_inventory_csv(request):
 
 def export_sales_csv(request):
     cc = request.GET.get('current_company', 'IKUJI'); res = HttpResponse(content_type='text/csv'); res['Content-Disposition'] = f'attachment; filename="sales_{cc}.csv"'
-    buf = io.StringIO(); writer = csv.writer(buf); writer.writerow(['伝票日付', '商品コード', '商品名', '販売数', '得意先名'])
-    for s in SalesHistory.objects.select_related('product').filter(company=cc): writer.writerow([s.sold_date.strftime('%Y/%m/%d'), s.product.code, s.product.name, s.quantity, s.customer])
+    buf = io.StringIO(); writer = csv.writer(buf); writer.writerow(['伝票日付', '得意先コード', '商品コード', '区分', '販売数', '税抜金額', '粗利金額'])
+    for s in SalesHistory.objects.select_related('product').filter(company=cc): writer.writerow([s.sold_date.strftime('%Y/%m/%d'), s.customer, s.product.code, s.sales_category, s.quantity, s.tax_excluded_amount, s.gross_profit_amount])
     res.write(buf.getvalue().encode('cp932', errors='replace')); return res
 
 def export_arrivals_csv(request):
@@ -514,6 +1012,166 @@ def export_arrivals_csv(request):
     buf = io.StringIO(); writer = csv.writer(buf); writer.writerow(['商品コード', '商品名', '入荷予定日', '入荷予定数量', '確度ステータス'])
     for a in ArrivalSchedule.objects.select_related('product').filter(product__owner_company=cc): writer.writerow([a.product.code, a.product.name, a.arrival_date.strftime('%Y/%m/%d'), a.quantity, a.status])
     res.write(buf.getvalue().encode('cp932', errors='replace')); return res
+
+def export_inventory_states_csv(request):
+    res = HttpResponse(content_type='text/csv')
+    res['Content-Disposition'] = 'attachment; filename="inventory_states.csv"'
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['状態コード', '状態名'])
+    for state in InventoryState.objects.order_by('state_code'):
+        writer.writerow([state.state_code, state.state_name])
+    res.write(buf.getvalue().encode('cp932', errors='replace'))
+    return res
+
+def download_inventory_state_template(request):
+    res = HttpResponse(content_type='text/csv')
+    res['Content-Disposition'] = 'attachment; filename="template_inventory_states.csv"'
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['状態コード', '状態名'])
+    writer.writerow(['001', 'A品'])
+    writer.writerow(['991', 'B品'])
+    res.write(buf.getvalue().encode('cp932', errors='replace'))
+    return res
+
+def import_valuation_csv(request):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    if request.method == 'POST' and request.FILES.get('csv_file'):
+        try:
+            inventory_date = parse_inventory_date(request.POST.get('inventory_date'), current_company)
+            stats = import_valuation_snapshot(request.FILES['csv_file'], inventory_date, current_company)
+            messages.success(
+                request,
+                f"棚卸資産評価を登録しました。明細: {stats['snapshots']}件 / 状態SKU: {stats['variants']}件 / "
+                f"倉庫: {stats['warehouses']}件 / ペットセレクト資産振替: {stats['select_asset_rows']}件 / "
+                f"スキップ: {stats['skipped']}件 / 数量エラー: {stats['quantity_errors']}件"
+            )
+            return redirect(f'/valuation/?current_company={current_company}&inventory_date={inventory_date:%Y-%m-%d}')
+        except Exception as e:
+            messages.error(request, f"棚卸資産評価登録エラー: {e}")
+    return redirect('/valuation/?current_company=' + current_company)
+
+def import_inventory_state_csv(request):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    if request.method == 'POST' and request.FILES.get('csv_file'):
+        try:
+            stats = import_inventory_state_master(request.FILES['csv_file'])
+            messages.success(
+                request,
+                f"在庫状態マスタを登録しました。登録/更新: {stats['imported']}件 / "
+                f"スキップ: {stats['skipped']}件 / 状態別SKU更新: {stats.get('variants_updated', 0)}件"
+            )
+        except Exception as e:
+            messages.error(request, f"在庫状態マスタ登録エラー: {e}")
+    return redirect(request.META.get('HTTP_REFERER', '/valuation/?current_company=' + current_company))
+
+@require_POST
+def sync_valuation_to_planning(request):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    inventory_date = parse_inventory_date(request.POST.get('inventory_date'), current_company)
+    stats = sync_snapshot_to_planning_inventory(inventory_date, current_company)
+    messages.success(
+        request,
+        f"棚卸資産評価から発注計画へ在庫数量を反映しました。商品: {stats['products']}件 / "
+        f"倉庫別: {stats['warehouse_rows']}件 / 発注計画除外明細: {stats['excluded_snapshots']}件"
+    )
+    return redirect(f'/valuation/?current_company={current_company}&inventory_date={inventory_date:%Y-%m-%d}')
+
+def export_valuation_excel(request):
+    current_company = request.GET.get('current_company', 'IKUJI')
+    inventory_date = parse_inventory_date(request.GET.get('inventory_date'), current_company)
+    ctx = valuation_context(inventory_date, current_company)
+    rows = []
+    rows.append('<html><head><meta charset="utf-8"></head><body>')
+    rows.append(f'<h2>棚卸資産評価報告書 {inventory_date:%Y-%m-%d}</h2>')
+    rows.append(f'<p>会社: {current_company} / 数量合計: {ctx["total_quantity"]} / 金額合計: {ctx["total_amount"]}</p>')
+    rows.append('<h3>倉庫別</h3><table border="1"><tr><th>倉庫</th><th>数量</th><th>在庫金額</th></tr>')
+    for row in ctx['warehouse_summary']:
+        rows.append(f'<tr><td>{row["warehouse__name"]}</td><td>{row["quantity"] or 0}</td><td>{row["amount"] or 0}</td></tr>')
+    rows.append('</table><h3>状態別明細</h3><table border="1"><tr><th>商品コード</th><th>商品名</th><th>状態</th><th>状態名</th><th>原価</th><th>数量</th><th>在庫金額</th></tr>')
+    for row in ctx['variant_summary']:
+        rows.append(
+            f'<tr><td>{row["product_variant__product__code"]}</td><td>{row["product_variant__product__name"]}</td>'
+            f'<td>{row["product_variant__state_code"]}</td><td>{row["product_variant__state_name"]}</td>'
+            f'<td>{row["unit_cost"]}</td><td>{row["quantity"] or 0}</td><td>{row["amount"] or 0}</td></tr>'
+        )
+    rows.append('</table></body></html>')
+    response = HttpResponse('\n'.join(rows).encode('utf-8'), content_type='application/vnd.ms-excel; charset=utf-8')
+    response['Content-Disposition'] = f'attachment; filename="valuation_{current_company}_{inventory_date:%Y%m%d}.xls"'
+    return response
+
+def download_valuation_template(request):
+    current_company = request.GET.get('current_company', 'IKUJI')
+    default_warehouses = (
+        ['ペットセレクト倉庫', 'ペットセレクト移動中']
+        if current_company == 'SELECT'
+        else ['ニチイク物流', '岸和田倉庫', 'PET SELECT', '西松屋', '本社ショールーム', '東京ショールーム', 'B品(ニチイク)', 'B品(岸和田)', '廃棄']
+    )
+    warehouses = list(Warehouse.objects.filter(owner_company=current_company).values_list('name', flat=True)) or default_warehouses
+    sample_code = '0040007001' if current_company == 'IKUJI' else '0040006001'
+    sample = [sample_code, 'サンプル商品名称', 'A品', '1000'] + ['0'] * len(warehouses)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['商品コード', '商品名', '状態名', '原価'] + warehouses)
+    writer.writerow(sample)
+    response = HttpResponse(buf.getvalue().encode('cp932', errors='replace'), content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="template_valuation_{current_company}.csv"'
+    return response
+
+def _simple_pdf_bytes(lines):
+    escaped = [line.replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)') for line in lines]
+    text_ops = ['BT /F1 10 Tf 40 800 Td']
+    for idx, line in enumerate(escaped[:55]):
+        if idx == 0:
+            text_ops.append(f'({line}) Tj')
+        else:
+            text_ops.append(f'0 -14 Td ({line}) Tj')
+    text_ops.append('ET')
+    stream = '\n'.join(text_ops).encode('latin-1', errors='replace')
+    objects = [
+        b'1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
+        b'2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
+        b'3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
+        b'4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
+        b'5 0 obj << /Length ' + str(len(stream)).encode('ascii') + b' >> stream\n' + stream + b'\nendstream endobj',
+    ]
+    pdf = [b'%PDF-1.4\n']
+    offsets = []
+    for obj in objects:
+        offsets.append(sum(len(part) for part in pdf))
+        pdf.append(obj + b'\n')
+    xref_pos = sum(len(part) for part in pdf)
+    pdf.append(f'xref\n0 {len(objects)+1}\n0000000000 65535 f \n'.encode('ascii'))
+    for offset in offsets:
+        pdf.append(f'{offset:010d} 00000 n \n'.encode('ascii'))
+    pdf.append(f'trailer << /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF'.encode('ascii'))
+    return b''.join(pdf)
+
+def export_valuation_pdf(request):
+    current_company = request.GET.get('current_company', 'IKUJI')
+    inventory_date = parse_inventory_date(request.GET.get('inventory_date'), current_company)
+    ctx = valuation_context(inventory_date, current_company)
+    lines = [
+        f'Inventory Valuation Report {inventory_date:%Y-%m-%d}',
+        f'Company: {current_company}',
+        f'Total quantity: {ctx["total_quantity"]}',
+        f'Total amount: {ctx["total_amount"]}',
+        '',
+        'Warehouse summary',
+    ]
+    for row in ctx['warehouse_summary']:
+        lines.append(f'{row["warehouse__name"]}: qty {row["quantity"] or 0}, amount {row["amount"] or 0}')
+    lines.append('')
+    lines.append('Variant summary')
+    for row in list(ctx['variant_summary'])[:35]:
+        lines.append(
+            f'{row["product_variant__product__code"]}-{row["product_variant__state_code"]} '
+            f'qty {row["quantity"] or 0} cost {row["unit_cost"]} amount {row["amount"] or 0}'
+        )
+    response = HttpResponse(_simple_pdf_bytes(lines), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="valuation_{current_company}_{inventory_date:%Y%m%d}.pdf"'
+    return response
 
 @require_POST
 def delete_sales_history_period(request):

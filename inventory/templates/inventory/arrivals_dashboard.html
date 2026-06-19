@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>入荷予定・発注残Dashboard</title>
+    <style>
+        html, body { margin: 0; padding: 0; height: 100%; font-family: sans-serif; background: #f6f8fa; color: #212529; }
+        body { padding: 18px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; }
+        .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+        h1 { margin: 0; font-size: 22px; }
+        .nav { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+        .nav-group { display: flex; gap: 6px; align-items: center; padding-left: 10px; border-left: 1px solid #ced4da; }
+        .nav-group:first-child { border-left: 0; padding-left: 0; }
+        .nav-label { font-size: 10px; font-weight: bold; color: #6c757d; }
+        .btn, button { border: 1px solid #adb5bd; background: #fff; color: #212529; padding: 5px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; text-decoration: none; cursor: pointer; white-space: nowrap; }
+        .btn.primary, button.primary { background: #856404; border-color: #856404; color: #fff; }
+        .btn.danger, button.danger { background: #dc3545; border-color: #dc3545; color: #fff; }
+        .company-tabs { display: flex; gap: 4px; border-bottom: 2px solid #dee2e6; }
+        .company-tab { padding: 7px 18px; border: 1px solid #ced4da; border-bottom: 0; background: #e9ecef; color: #495057; text-decoration: none; font-size: 13px; font-weight: bold; border-radius: 4px 4px 0 0; }
+        .company-tab.active { background: #856404; color: #fff; border-color: #856404; }
+        .panel { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: 10px; }
+        .toolbar { display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .inline-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        input, select { border: 1px solid #ced4da; border-radius: 4px; padding: 4px 6px; font-size: 12px; box-sizing: border-box; }
+        input[type="number"] { text-align: right; }
+        .messages { display: flex; flex-direction: column; gap: 4px; }
+        .message { padding: 6px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; background: #fff3cd; color: #856404; border: 1px solid #ffe08a; }
+        .table-wrap { flex: 1; overflow: auto; background: #fff; border: 1px solid #c9ced6; }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; min-width: 920px; }
+        th, td { border-right: 1px solid #c9ced6; border-bottom: 2px solid #8f969e; padding: 5px 7px; text-align: left; vertical-align: middle; }
+        th { position: sticky; top: 0; z-index: 2; background: #fff3cd; font-weight: bold; }
+        .code { font-weight: bold; color: #495057; white-space: nowrap; }
+        .name { min-width: 280px; }
+        .num { width: 80px; }
+        .pager { display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>入荷予定・発注残Dashboard</h1>
+        <div class="nav">
+            <div class="nav-group">
+                <span class="nav-label">Dashboard</span>
+                <a class="btn" href="{% url 'planning_dashboard' %}?current_company={{ current_company }}">在庫・発注計画</a>
+                <a class="btn" href="{% url 'product_master_dashboard' %}?current_company={{ current_company }}">商品マスタ登録</a>
+                <a class="btn" href="{% url 'sales_history_dashboard' %}?current_company={{ current_company }}">日次販売履歴</a>
+                <a class="btn" href="{% url 'valuation_dashboard' %}?current_company={{ current_company }}">棚卸資産評価</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">説明</span>
+                <a class="btn" href="{% url 'about_app' %}?current_company={{ current_company }}">このアプリについて</a>
+                <a class="btn" href="{% url 'operation_guide' %}?current_company={{ current_company }}" target="_blank">画面説明・運用ガイド</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">管理</span>
+                <a class="btn" href="/admin/" target="_blank">Django管理画面</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="company-tabs">
+        <a href="?current_company=IKUJI" class="company-tab {% if current_company == 'IKUJI' %}active{% endif %}">日本育児</a>
+        <a href="?current_company=SELECT" class="company-tab {% if current_company == 'SELECT' %}active{% endif %}">ペットセレクト</a>
+    </div>
+
+    {% if messages %}
+    <div class="messages">
+        {% for message in messages %}<div class="message">{{ message.message }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="panel toolbar">
+        <form method="GET" class="inline-form">
+            <input type="hidden" name="current_company" value="{{ current_company }}">
+            <input type="text" name="search_query" value="{{ search_query }}" placeholder="商品コード・商品名" style="width: 220px;">
+            <button type="submit" class="primary">検索</button>
+            {% if search_query %}<a class="btn" href="?current_company={{ current_company }}">クリア</a>{% endif %}
+        </form>
+        <form action="{% url 'import_arrivals_csv' %}" method="POST" enctype="multipart/form-data" class="inline-form">
+            {% csrf_token %}
+            <input type="hidden" name="current_company" value="{{ current_company }}">
+            <a class="btn" href="{% url 'download_csv_template' 'arrivals' %}?current_company={{ current_company }}">雛形</a>
+            <a class="btn" href="{% url 'export_arrivals_csv' %}?current_company={{ current_company }}">CSV出力</a>
+            <input type="file" name="csv_file" accept=".csv" required>
+            <button type="submit" class="primary" onclick="return confirm('現在の入荷予定をCSV内容で洗替更新しますか？');">CSV洗替</button>
+        </form>
+    </div>
+
+    <div class="panel">
+        <form action="{% url 'create_arrival_schedule' %}" method="POST" class="inline-form">
+            {% csrf_token %}
+            <input type="hidden" name="current_company" value="{{ current_company }}">
+            <input type="text" name="product_code" placeholder="商品コード" required style="width: 120px;">
+            <input type="date" name="arrival_date" required>
+            <input type="number" name="quantity" placeholder="数量" required class="num" min="0">
+            <select name="status">{% for value, label in status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
+            <button type="submit" class="primary">個別追加/上書き</button>
+        </form>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>保存</th><th>商品コード</th><th>商品名</th><th>入荷予定日</th><th>数量</th><th>確度</th><th>削除</th></tr>
+            </thead>
+            <tbody>
+                {% for arr in arrivals %}
+                <tr>
+                    <td>
+                        <form id="arrivalForm{{ arr.id }}" action="{% url 'update_arrival_schedule' arr.id %}" method="POST">
+                            {% csrf_token %}
+                            <button type="submit" class="primary">保存</button>
+                        </form>
+                    </td>
+                    <td class="code">{{ arr.product.code }}</td>
+                    <td class="name">{{ arr.product.name }}</td>
+                    <td><input form="arrivalForm{{ arr.id }}" type="date" name="arrival_date" value="{{ arr.arrival_date|date:'Y-m-d' }}"></td>
+                    <td><input form="arrivalForm{{ arr.id }}" type="number" name="quantity" value="{{ arr.quantity }}" class="num" min="0"></td>
+                    <td><select form="arrivalForm{{ arr.id }}" name="status">{% for value, label in status_choices %}<option value="{{ value }}" {% if arr.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
+                    <td>
+                        <form action="{% url 'delete_arrival_schedule' arr.id %}" method="POST" onsubmit="return confirm('入荷予定を削除しますか？');">
+                            {% csrf_token %}
+                            <button type="submit" class="danger">削除</button>
+                        </form>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" style="text-align: center; padding: 18px;">入荷予定はありません。</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="pager">
+        {% if page_obj.has_previous %}<a class="btn" href="?current_company={{ current_company }}&search_query={{ search_query }}&page={{ page_obj.previous_page_number }}">前へ</a>{% endif %}
+        <span>{{ page_obj.number }} / {{ page_obj.paginator.num_pages }} ページ（{{ page_obj.paginator.count }} 件）</span>
+        {% if page_obj.has_next %}<a class="btn" href="?current_company={{ current_company }}&search_query={{ search_query }}&page={{ page_obj.next_page_number }}">次へ</a>{% endif %}
+    </div>
+</body>
+</html>

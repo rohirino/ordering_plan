@@ -4,42 +4,85 @@
     <meta charset="UTF-8">
     <title>このアプリについて</title>
     <style>
-        body { font-family: sans-serif; background-color: #f8f9fa; color: #333; line-height: 1.6; padding: 40px; }
-        .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 30px 40px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        h1 { font-size: 24px; border-bottom: 2px solid #0056b3; padding-bottom: 10px; margin-bottom: 20px; color: #0056b3; }
-        h2 { font-size: 18px; color: #212529; margin-top: 30px; border-left: 4px solid #0056b3; padding-left: 10px; }
-        p { font-size: 14px; margin-bottom: 15px; }
-        ul { font-size: 14px; margin-bottom: 20px; padding-left: 20px; }
-        li { margin-bottom: 8px; }
-        .back-btn { display: inline-block; background-color: #6c757d; color: #fff; padding: 8px 16px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px; margin-bottom: 20px; transition: background-color 0.2s; }
-        .back-btn:hover { background-color: #5a6268; }
-        .highlight-box { background-color: #eaf4ff; border: 1px solid #b8daff; padding: 15px; border-radius: 6px; margin: 20px 0; }
+        body { font-family: sans-serif; background: #f6f8fa; color: #24292f; line-height: 1.7; padding: 28px; }
+        .container { max-width: 980px; margin: 0 auto; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 28px 36px; }
+        .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+        .btn { border: 1px solid #adb5bd; background: #fff; color: #212529; padding: 6px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; text-decoration: none; }
+        .btn.primary { background: #495057; border-color: #495057; color: #fff; }
+        h1 { margin: 0 0 8px; font-size: 26px; }
+        h2 { margin-top: 28px; padding-left: 10px; border-left: 4px solid #c92a2a; font-size: 18px; }
+        body.company-select h2 { border-left-color: #1864ab; }
+        p, li { font-size: 14px; }
+        ul { padding-left: 20px; }
+        .summary { background: #f1f8ff; border: 1px solid #c8e1ff; border-radius: 6px; padding: 14px 16px; margin: 16px 0; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+        .card { border: 1px solid #d0d7de; border-radius: 6px; padding: 12px; background: #fff; }
+        .card strong { display: block; margin-bottom: 4px; }
+        .note { color: #57606a; font-size: 13px; }
     </style>
 </head>
-<body>
+<body class="{% if current_company == 'SELECT' %}company-select{% endif %}">
     <div class="container">
-        <a href="/?current_company={{ current_company }}" class="back-btn">← ダッシュボードへ戻る</a>
-        
-        <h1>需要予測＆在庫管理アプリについて</h1>
-        <p>本システムは、過去の販売実績と現在の在庫状況から未来の在庫推移をシミュレーションし、適切な発注タイミングと発注量を自動算出するための業務支援アプリケーションです。</p>
+        <div class="nav">
+            <a class="btn primary" href="{% url 'planning_dashboard' %}?current_company={{ current_company }}">在庫・発注計画へ戻る</a>
+            <a class="btn" href="{% url 'product_master_dashboard' %}?current_company={{ current_company }}">商品マスタ登録</a>
+            <a class="btn" href="{% url 'sales_history_dashboard' %}?current_company={{ current_company }}">日次販売履歴</a>
+            <a class="btn" href="{% url 'arrivals_dashboard' %}?current_company={{ current_company }}">入荷予定・発注残</a>
+            <a class="btn" href="{% url 'valuation_dashboard' %}?current_company={{ current_company }}">棚卸資産評価</a>
+            <a class="btn" href="{% url 'operation_guide' %}?current_company={{ current_company }}">画面説明・運用ガイド</a>
+            <a class="btn" href="/admin/" target="_blank">Django管理画面</a>
+        </div>
 
-        <h2>主な特徴と機能</h2>
+        <h1>このアプリについて</h1>
+        <p class="note">販売履歴、棚卸在庫、入荷予定、商品別の発注パラメータをつなげて、欠品予測と発注判断を支援する社内向けアプリです。</p>
+
+        <div class="summary">
+            このアプリは、過去の販売実績から需要の勢いを見積もり、棚卸確定在庫を起点に未来120日間の在庫推移を確認するためのものです。あわせて、棚卸資産評価では状態コード別の原価・数量・在庫金額を管理し、販売在庫に含める状態だけを発注計画へ反映できます。
+        </div>
+
+        <h2>画面の役割</h2>
+        <div class="grid">
+            <div class="card">
+                <strong>在庫・発注計画Dashboard</strong>
+                販売履歴、現在庫、入荷予定をもとに、欠品リスク、発注点割れ、発注計画を確認します。
+            </div>
+            <div class="card">
+                <strong>商品マスタ登録Dashboard</strong>
+                商品コード7桁を単位に、リードタイム、発注ロット、安全在庫、需要参照元、管理外設定を管理します。棚卸CSVから自動生成・更新された商品も識別できます。
+            </div>
+            <div class="card">
+                <strong>日次販売履歴Dashboard</strong>
+                販売管理ソフトの売上明細CSVを取り込み、日付・得意先・商品・区分ごとの販売実績を確認します。
+            </div>
+            <div class="card">
+                <strong>入荷予定・発注残Dashboard</strong>
+                入荷予定をCSVで洗替登録し、必要に応じて個別追加・修正します。
+            </div>
+            <div class="card">
+                <strong>棚卸資産評価Dashboard</strong>
+                商品コード7桁と状態コード3桁を分けて、状態別の原価、数量、在庫金額を管理します。B品など販売在庫に含めない状態は発注計画から除外できます。
+            </div>
+        </div>
+
+        <h2>商品マスタと棚卸資産評価の関係</h2>
         <ul>
-            <li><strong>未来120日間の在庫シミュレーション：</strong>長期および直近の販売実績から需要トレンド（勢い）を算出し、設定されたリードタイム（LT）と最低在庫を加味して未来の在庫推移を描画します。</li>
-            <li><strong>自動アラートと発注計算：</strong>「欠品リスク」や「発注点割れ」を自動検知して警告。発注ロットや超過ルールに従い、不足分を補う最適な発注計画をワンクリックで生成します。</li>
-            <li><strong>実務データとの親和性：</strong>基幹システムから出力し、Excel等でピボット集計したCSVデータをそのままインポート可能。コードのゼロ落ちや不要な特殊文字はシステムが自動で洗浄・補正します。</li>
-            <li><strong>1画面完結のUI：</strong>マスタの設定変更（LT、ロット、最低在庫の調整、商品の管理外設定など）や不要な倉庫の削除を、ダッシュボード上から直接即時反映できます。</li>
+            <li>商品マスタは7桁の商品コードを親として管理します。</li>
+            <li>棚卸資産評価は、10桁の商品コードを7桁の商品コードと3桁の状態コードに分けて取り込みます。</li>
+            <li>棚卸CSVに商品マスタ未登録の商品があれば、自動で商品マスタへ作成します。</li>
+            <li>棚卸CSVで既存商品の商品名が変わった場合は、商品マスタ側に更新履歴として表示します。</li>
         </ul>
 
-        <h2>日本育児とペットセレクトの「2レイヤー管理」</h2>
-        <div class="highlight-box">
-            <p>本システムは、<strong>「マルチカンパニー（2レイヤー）設計」</strong>を採用しています。「日本育児」と「ペットセレクト」は同じシステム上に存在しながら、データ空間としては完全に独立しています。</p>
-            <ul>
-                <li><strong>完全なデータ分離：</strong>画面上部のタブを切り替えることで管轄レイヤーが切り替わります。商品マスタ、在庫数、販売実績、入荷予定、設定値はレイヤーごとに完全に独立しており、データが混ざることはありません。</li>
-                <li><strong>倉庫の独立：</strong>在庫を保管する「倉庫」も各レイヤー専用です。インポートしたCSVの列名から自動的に専用倉庫が構築されます。</li>
-                <li><strong>独立採算と統一運用の両立：</strong>事業部ごとの独立したデータ管理を担保しつつ、システムとしての操作方法や計算ロジックは統一されているため、実務担当者の学習コストを最小限に抑えます。</li>
-            </ul>
-        </div>
+        <h2>会社別管理</h2>
+        <p>日本育児とペットセレクトは、同じアプリ内で会社を切り替えて運用します。画面の基本色は日本育児が赤、ペットセレクトが青です。状態コード400、401、404はペットセレクト資産として扱うルールを棚卸取込に反映しています。</p>
+
+        <h2>このアプリが補助する判断</h2>
+        <ul>
+            <li>どの商品が近いうちに欠品しそうか。</li>
+            <li>現在庫が発注点を下回っているか。</li>
+            <li>発注ロットや安全在庫を見直すべき商品はどれか。</li>
+            <li>状態別在庫のうち、発注計画へ含めるべき数量はどれか。</li>
+            <li>月末棚卸時点の在庫金額を、商品別・状態別・倉庫別に説明できるか。</li>
+        </ul>
     </div>
 </body>
 </html>

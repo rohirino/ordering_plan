@@ -3,11 +3,21 @@ from . import views
 
 urlpatterns = [
     path('', views.planning_dashboard, name='planning_dashboard'),
+    path('product-master/', views.product_master_dashboard, name='product_master_dashboard'),
+    path('arrivals/', views.arrivals_dashboard, name='arrivals_dashboard'),
+    path('sales-history/', views.sales_history_dashboard, name='sales_history_dashboard'),
+    path('valuation/', views.valuation_dashboard, name='valuation_dashboard'),
     path('about/', views.about_app, name='about_app'),
     path('guide/', views.operation_guide, name='operation_guide'),
     
     # 商品マスタの画面直接更新・削除
+    path('create-product/', views.create_product, name='create_product'),
     path('update-product-config/<int:product_id>/', views.update_product_config, name='update_product_config'),
+    path('bulk-update-products/', views.bulk_update_products, name='bulk_update_products'),
+    path('create-inventory-state/', views.create_inventory_state, name='create_inventory_state'),
+    path('update-inventory-state/<int:state_id>/', views.update_inventory_state, name='update_inventory_state'),
+    path('update-product-variant-planning/<int:variant_id>/', views.update_product_variant_planning_flag, name='update_product_variant_planning_flag'),
+    path('bulk-update-product-variant-planning/', views.bulk_update_product_variant_planning_flags, name='bulk_update_product_variant_planning_flags'),
     path('delete-product/<int:product_id>/', views.delete_product, name='delete_product'),
     
     # 発注計画のステータス更新・削除
@@ -16,6 +26,7 @@ urlpatterns = [
     path('bulk-create-order-plan/', views.bulk_create_order_plan, name='bulk_create_order_plan'),
     
     # 入荷予定の画面直接更新・個別削除
+    path('create-arrival-schedule/', views.create_arrival_schedule, name='create_arrival_schedule'),
     path('update-arrival-schedule/<int:arrival_id>/', views.update_arrival_schedule, name='update_arrival_schedule'),
     path('delete-arrival-schedule/<int:arrival_id>/', views.delete_arrival_schedule, name='delete_arrival_schedule'),
     
@@ -24,6 +35,9 @@ urlpatterns = [
     path('import-inventory/', views.import_inventory_csv, name='import_inventory_csv'),
     path('import-sales/', views.import_sales_csv, name='import_sales_csv'),
     path('import-arrivals/', views.import_arrivals_csv, name='import_arrivals_csv'),
+    path('import-valuation/', views.import_valuation_csv, name='import_valuation_csv'),
+    path('import-inventory-states/', views.import_inventory_state_csv, name='import_inventory_state_csv'),
+    path('sync-valuation-to-planning/', views.sync_valuation_to_planning, name='sync_valuation_to_planning'),
     path('delete-warehouse/<int:warehouse_id>/', views.delete_warehouse, name='delete_warehouse'), # ★この行を追加
     
     path('download-template/<str:template_type>/', views.download_csv_template, name='download_csv_template'),
@@ -31,6 +45,11 @@ urlpatterns = [
     path('export-inventory/', views.export_inventory_csv, name='export_inventory_csv'),
     path('export-sales/', views.export_sales_csv, name='export_sales_csv'),
     path('export-arrivals/', views.export_arrivals_csv, name='export_arrivals_csv'),
+    path('export-inventory-states/', views.export_inventory_states_csv, name='export_inventory_states_csv'),
+    path('download-inventory-state-template/', views.download_inventory_state_template, name='download_inventory_state_template'),
+    path('export-valuation-excel/', views.export_valuation_excel, name='export_valuation_excel'),
+    path('download-valuation-template/', views.download_valuation_template, name='download_valuation_template'),
+    path('export-valuation-pdf/', views.export_valuation_pdf, name='export_valuation_pdf'),
     
     path('create-order/<int:product_id>/', views.create_order_plan, name='create_order_plan'),
     path('products/', views.product_list, name='product_list'),

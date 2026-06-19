@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>商品マスタ登録Dashboard</title>
+    <style>
+        html, body { margin: 0; padding: 0; height: 100%; font-family: sans-serif; background: #fff5f5; color: #212529; }
+        body { padding: 18px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; }
+        body.company-select { background: #f5f9ff; }
+        .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+        h1 { margin: 0; font-size: 22px; }
+        .nav { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+        .nav-group { display: flex; gap: 6px; align-items: center; padding-left: 10px; border-left: 1px solid #ced4da; }
+        .nav-group:first-child { border-left: 0; padding-left: 0; }
+        .nav-label { font-size: 10px; font-weight: bold; color: #6c757d; }
+        .btn, button { border: 1px solid #adb5bd; background: #fff; color: #212529; padding: 5px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; text-decoration: none; cursor: pointer; white-space: nowrap; }
+        .btn.primary, button.primary { background: #c92a2a; border-color: #c92a2a; color: #fff; }
+        body.company-select .btn.primary, body.company-select button.primary { background: #1864ab; border-color: #1864ab; }
+        .btn.danger, button.danger { background: #dc3545; border-color: #dc3545; color: #fff; }
+        .company-tabs { display: flex; gap: 4px; border-bottom: 2px solid #dee2e6; }
+        .company-tab { padding: 7px 18px; border: 1px solid #ced4da; border-bottom: 0; background: #e9ecef; color: #495057; text-decoration: none; font-size: 13px; font-weight: bold; border-radius: 4px 4px 0 0; }
+        .company-tab.active { background: #c92a2a; color: #fff; border-color: #c92a2a; }
+        body.company-select .company-tab.active { background: #1864ab; border-color: #1864ab; }
+        .panel { background: #fff; border: 1px solid #ffc9c9; border-radius: 6px; padding: 10px; }
+        body.company-select .panel { border-color: #b8daff; }
+        .toolbar { display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .inline-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        h2 { margin: 0 0 8px 0; font-size: 16px; }
+        .bulk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 8px; align-items: stretch; }
+        .bulk-item { display: grid; grid-template-columns: 18px 76px minmax(0, 1fr); gap: 6px; align-items: center; min-height: 34px; padding: 6px; border: 1px solid #dee2e6; border-radius: 5px; background: #f8f9fa; font-size: 11px; font-weight: bold; color: #495057; }
+        .bulk-item input[type="checkbox"] { justify-self: center; margin: 0; }
+        .bulk-item input:not([type="checkbox"]), .bulk-item select { width: 100%; min-width: 0; }
+        .bulk-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+        input, select { border: 1px solid #ced4da; border-radius: 4px; padding: 4px 6px; font-size: 12px; box-sizing: border-box; }
+        input[type="number"] { text-align: right; }
+        .messages { display: flex; flex-direction: column; gap: 4px; }
+        .message { padding: 6px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; background: #d3f9d8; color: #2b5730; border: 1px solid #b2f2bb; }
+        .table-wrap { flex: 1; overflow: auto; background: #fff; border: 1px solid #c9ced6; }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; min-width: 1500px; }
+        th, td { border-right: 1px solid #c9ced6; border-bottom: 2px solid #8f969e; padding: 4px 6px; text-align: left; vertical-align: middle; }
+        th { position: sticky; top: 0; z-index: 2; background: #e9ecef; font-weight: bold; }
+        td.code { font-weight: bold; color: #495057; white-space: nowrap; }
+        .name-input { width: 280px; }
+        .num-small { width: 64px; }
+        .supplier-input { width: 90px; }
+        .select-mid { width: 150px; }
+        .check-cell { text-align: center; }
+        .source-cell { min-width: 130px; }
+        .badge { display: inline-block; padding: 2px 6px; border-radius: 999px; font-size: 11px; font-weight: bold; white-space: nowrap; }
+        .badge.valuation-created { background: #fff3bf; color: #7c5c00; border: 1px solid #ffd43b; }
+        .badge.valuation-updated { background: #e7f5ff; color: #0b5c8f; border: 1px solid #74c0fc; }
+        .badge.manual { background: #f1f3f5; color: #495057; border: 1px solid #ced4da; }
+        .source-note { display: block; margin-top: 2px; color: #6c757d; font-size: 10px; white-space: nowrap; }
+        .pager { display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 13px; }
+        .state-layout { display: grid; grid-template-columns: minmax(360px, 0.75fr) minmax(460px, 1.25fr); gap: 10px; align-items: start; }
+        .state-list { max-height: 220px; overflow: auto; border: 1px solid #c9ced6; }
+        .state-list table { min-width: 520px; }
+        .state-code { width: 78px; font-weight: bold; white-space: nowrap; }
+        .state-name-input { width: 260px; }
+        .accordion-panel { padding: 0; overflow: hidden; }
+        .accordion-panel > summary { cursor: pointer; list-style: none; padding: 10px; font-size: 16px; font-weight: bold; border-bottom: 1px solid #dee2e6; background: #fff; }
+        .accordion-panel > summary::-webkit-details-marker { display: none; }
+        .accordion-panel > summary::after { content: " +"; color: #6c757d; }
+        .accordion-panel[open] > summary::after { content: " -"; }
+        .accordion-content { padding: 10px; }
+        @media (max-width: 1100px) {
+            .state-layout { grid-template-columns: 1fr; }
+            .header { align-items: flex-start; flex-direction: column; }
+        }
+    </style>
+</head>
+<body class="{% if current_company == 'IKUJI' %}company-ikuji{% else %}company-select{% endif %}">
+    <div class="header">
+        <h1>商品マスタ登録Dashboard</h1>
+        <div class="nav">
+            <div class="nav-group">
+                <span class="nav-label">Dashboard</span>
+                <a class="btn" href="{% url 'planning_dashboard' %}?current_company={{ current_company }}">在庫・発注計画</a>
+                <a class="btn" href="{% url 'sales_history_dashboard' %}?current_company={{ current_company }}">日次販売履歴</a>
+                <a class="btn" href="{% url 'arrivals_dashboard' %}?current_company={{ current_company }}">入荷予定・発注残</a>
+                <a class="btn" href="{% url 'valuation_dashboard' %}?current_company={{ current_company }}">棚卸資産評価</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">説明</span>
+                <a class="btn" href="{% url 'about_app' %}?current_company={{ current_company }}">このアプリについて</a>
+                <a class="btn" href="{% url 'operation_guide' %}?current_company={{ current_company }}" target="_blank">画面説明・運用ガイド</a>
+            </div>
+            <div class="nav-group">
+                <span class="nav-label">管理</span>
+                <a class="btn" href="/admin/" target="_blank">Django管理画面</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="company-tabs">
+        <a href="?current_company=IKUJI" class="company-tab {% if current_company == 'IKUJI' %}active{% endif %}">日本育児</a>
+        <a href="?current_company=SELECT" class="company-tab {% if current_company == 'SELECT' %}active{% endif %}">ペットセレクト</a>
+    </div>
+
+    {% if messages %}
+    <div class="messages">
+        {% for message in messages %}<div class="message">{{ message.message }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="panel toolbar">
+        <form method="GET" class="inline-form">
+            <input type="hidden" name="current_company" value="{{ current_company }}">
+            <input type="text" name="search_query" value="{{ search_query }}" placeholder="コード・商品名・仕入先" style="width: 220px;">
+            <input type="text" name="product_prefix" value="{{ product_prefix }}" placeholder="前3桁" maxlength="3" style="width: 58px;">
+            <label style="font-size: 12px; font-weight: bold; color: #495057; display: flex; align-items: center; gap: 4px;"><input type="checkbox" name="show_discontinued" value="1" {% if show_discontinued %}checked{% endif %}>廃盤も表示</label>
+            <select name="product_sort">
+                <option value="code" {% if product_sort == 'code' %}selected{% endif %}>商品コード</option>
+                <option value="name" {% if product_sort == 'name' %}selected{% endif %}>商品名</option>
+                <option value="source" {% if product_sort == 'source' %}selected{% endif %}>棚卸由来</option>
+                <option value="price" {% if product_sort == 'price' %}selected{% endif %}>原価</option>
+                <option value="supplier" {% if product_sort == 'supplier' %}selected{% endif %}>仕入先</option>
+                <option value="lead_time" {% if product_sort == 'lead_time' %}selected{% endif %}>LT</option>
+                <option value="order_lot" {% if product_sort == 'order_lot' %}selected{% endif %}>ロット</option>
+                <option value="safety_stock" {% if product_sort == 'safety_stock' %}selected{% endif %}>安全在庫</option>
+                <option value="trend_days" {% if product_sort == 'trend_days' %}selected{% endif %}>長期ベース</option>
+                <option value="demand_source" {% if product_sort == 'demand_source' %}selected{% endif %}>需要参照元</option>
+                <option value="discontinued" {% if product_sort == 'discontinued' %}selected{% endif %}>廃盤</option>
+            </select>
+            <select name="product_order">
+                <option value="asc" {% if product_order == 'asc' %}selected{% endif %}>昇順</option>
+                <option value="desc" {% if product_order == 'desc' %}selected{% endif %}>降順</option>
+            </select>
+            <button type="submit" class="primary">検索</button>
+            {% if search_query or product_prefix or show_discontinued %}<a class="btn" href="?current_company={{ current_company }}">クリア</a>{% endif %}
+        </form>
+        <form action="{% url 'import_products_csv' %}" method="POST" enctype="multipart/form-data" class="inline-form">
+            {% csrf_token %}
+            <input type="hidden" name="current_company" value="{{ current_company }}">
+            <a class="btn" href="{% url 'download_csv_template' 'products' %}?current_company={{ current_company }}">雛形</a>
+            <a class="btn" href="{% url 'export_products_csv' %}?current_company={{ current_company }}">CSV出力</a>
+            <input type="file" name="csv_file" accept=".csv" required>
+            <button type="submit" class="primary">CSV取込</button>
+        </form>
+    </div>
+
+    <div class="panel">
+        <form action="{% url 'create_product' %}" method="POST" class="inline-form">
+            {% csrf_token %}
+            <input type="hidden" name="current_company" value="{{ current_company }}">
+            <input type="text" name="code" placeholder="商品コード" required style="width: 100px;">
+            <input type="text" name="name" placeholder="商品名" required style="width: 280px;">
+            <input type="number" name="price" placeholder="原価" value="0" class="num-small">
+            <input type="text" name="supplier" placeholder="仕入先" class="supplier-input">
+            <input type="number" name="lead_time" value="30" class="num-small" min="0">
+            <input type="number" name="order_lot" value="1" class="num-small" min="1">
+            <input type="number" name="safety_stock" value="20" class="num-small" min="0">
+            <select name="trend_days">{% for value, label in trend_days_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
+            <select name="lot_rule">{% for value, label in lot_rule_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
+            <select name="demand_source">{% for value, label in company_choices %}<option value="{{ value }}" {% if value == current_company %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+            <label style="font-size: 12px; font-weight: bold; display: flex; align-items: center; gap: 4px;"><input type="checkbox" name="is_discontinued">廃盤</label>
+            <button type="submit" class="primary">新規登録</button>
+        </form>
+    </div>
+
+    <div class="panel">
+        <form id="bulkForm" action="{% url 'bulk_update_products' %}" method="POST">
+            {% csrf_token %}
+            <input type="hidden" name="current_company" value="{{ current_company }}">
+            <h2>商品パラメータ一括更新</h2>
+            <div class="bulk-grid">
+                <label class="bulk-item"><input type="checkbox" name="bulk_lead_time_enabled">LT<input type="number" name="bulk_lead_time" value="30" min="0"></label>
+                <label class="bulk-item"><input type="checkbox" name="bulk_order_lot_enabled">ロット<input type="number" name="bulk_order_lot" value="1" min="1"></label>
+                <label class="bulk-item"><input type="checkbox" name="bulk_safety_stock_enabled">安全在庫<input type="number" name="bulk_safety_stock" value="20" min="0"></label>
+                <label class="bulk-item"><input type="checkbox" name="bulk_trend_days_enabled">長期ベース<select name="bulk_trend_days">{% for value, label in trend_days_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
+                <label class="bulk-item"><input type="checkbox" name="bulk_lot_rule_enabled">超過ルール<select name="bulk_lot_rule">{% for value, label in lot_rule_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
+                <label class="bulk-item"><input type="checkbox" name="bulk_demand_source_enabled">需要参照元<select name="bulk_demand_source">{% for value, label in company_choices %}<option value="{{ value }}" {% if value == current_company %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+                <label class="bulk-item"><input type="checkbox" name="bulk_is_excluded_enabled">管理外<select name="bulk_is_excluded"><option value="false">OFF</option><option value="true">ON</option></select></label>
+                <label class="bulk-item"><input type="checkbox" name="bulk_is_discontinued_enabled">廃盤<select name="bulk_is_discontinued"><option value="false">OFF</option><option value="true">ON</option></select></label>
+                <label class="bulk-item"><input type="checkbox" name="bulk_allow_dead_order_enabled">処分品発注<select name="bulk_allow_dead_order"><option value="false">OFF</option><option value="true">ON</option></select></label>
+            </div>
+            <div class="bulk-actions">
+                <button type="button" onclick="document.querySelectorAll('.bulk-product-check').forEach((box) => box.checked = true);">表示中を全選択</button>
+                <button type="button" onclick="document.querySelectorAll('.bulk-product-check').forEach((box) => box.checked = false);">選択解除</button>
+                <button type="submit" class="primary">チェックした商品を一括更新</button>
+            </div>
+        </form>
+    </div>
+
+    <details class="panel accordion-panel">
+        <summary>状態コードマスタ</summary>
+        <div class="accordion-content state-layout">
+            <div>
+                <form action="{% url 'create_inventory_state' %}" method="POST" class="inline-form" style="margin-bottom: 8px;">
+                    {% csrf_token %}
+                    <input type="hidden" name="current_company" value="{{ current_company }}">
+                    <input type="text" name="state_code" placeholder="状態コード" maxlength="3" required style="width: 92px;">
+                    <input type="text" name="state_name" placeholder="状態名" required style="width: 220px;">
+                    <button type="submit" class="primary">個別登録/更新</button>
+                </form>
+                <form action="{% url 'import_inventory_state_csv' %}" method="POST" enctype="multipart/form-data" class="inline-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="current_company" value="{{ current_company }}">
+                    <a class="btn" href="{% url 'download_inventory_state_template' %}">雛形</a>
+                    <a class="btn" href="{% url 'export_inventory_states_csv' %}">CSV出力</a>
+                    <input type="file" name="csv_file" accept=".csv" required>
+                    <button type="submit" class="primary">状態コードCSV取込</button>
+                </form>
+            </div>
+            <div>
+                <form method="GET" class="inline-form" style="margin-bottom: 8px;">
+                    <input type="hidden" name="current_company" value="{{ current_company }}">
+                    <input type="hidden" name="search_query" value="{{ search_query }}">
+                    <input type="hidden" name="product_prefix" value="{{ product_prefix }}">
+                    <input type="hidden" name="product_sort" value="{{ product_sort }}">
+                    <input type="hidden" name="product_order" value="{{ product_order }}">
+                    {% if show_discontinued %}<input type="hidden" name="show_discontinued" value="1">{% endif %}
+                    <input type="text" name="state_search_query" value="{{ state_search_query }}" placeholder="状態コード・状態名" style="width: 180px;">
+                    <button type="submit" class="primary">状態検索</button>
+                    {% if state_search_query %}<a class="btn" href="?current_company={{ current_company }}&search_query={{ search_query }}&product_prefix={{ product_prefix }}&product_sort={{ product_sort }}&product_order={{ product_order }}{% if show_discontinued %}&show_discontinued=1{% endif %}">解除</a>{% endif %}
+                    <span style="font-size: 12px; color: #6c757d; font-weight: bold;">表示 {{ inventory_states|length }} / {{ inventory_state_count }} 件</span>
+                </form>
+                <div class="state-list">
+                    <table>
+                        <thead><tr><th>保存</th><th>状態コード</th><th>状態名</th></tr></thead>
+                        <tbody>
+                            {% for state in inventory_states %}
+                            <tr>
+                                <td>
+                                    <form id="stateForm{{ state.id }}" action="{% url 'update_inventory_state' state.id %}" method="POST">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="current_company" value="{{ current_company }}">
+                                        <button type="submit" class="primary">保存</button>
+                                    </form>
+                                </td>
+                                <td class="state-code">{{ state.state_code }}</td>
+                                <td><input form="stateForm{{ state.id }}" type="text" name="state_name" value="{{ state.state_name }}" class="state-name-input"></td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="3" style="text-align: center; padding: 12px;">状態コードがありません。</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </details>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>選択</th><th>保存</th><th>商品コード</th><th>商品名</th><th>棚卸由来</th><th>原価</th><th>仕入先</th><th>LT</th><th>ロット</th><th>安全在庫</th><th>長期ベース</th><th>超過ルール</th><th>需要参照元</th><th>管理外</th><th>廃盤</th><th>処分品発注</th><th>削除</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for product in products %}
+                <tr>
+                    <td class="check-cell"><input form="bulkForm" class="bulk-product-check" type="checkbox" name="product_ids" value="{{ product.id }}"></td>
+                    <td>
+                        <form id="productForm{{ product.id }}" method="POST" action="{% url 'update_product_config' product.id %}">
+                            {% csrf_token %}
+                            <button type="submit" class="primary">保存</button>
+                        </form>
+                    </td>
+                    <td class="code">{{ product.code }}</td>
+                    <td><input form="productForm{{ product.id }}" type="text" name="name" value="{{ product.name }}" class="name-input"></td>
+                    <td class="source-cell">
+                        {% if product.created_from_valuation %}
+                            <span class="badge valuation-created">棚卸生成</span>
+                        {% elif product.last_valuation_synced_at %}
+                            <span class="badge valuation-updated">棚卸更新</span>
+                        {% else %}
+                            <span class="badge manual">通常登録</span>
+                        {% endif %}
+                        {% if product.last_valuation_name_updated %}<span class="source-note">商品名更新あり</span>{% endif %}
+                        {% if product.last_valuation_inventory_date %}<span class="source-note">対象: {{ product.last_valuation_inventory_date|date:"Y/m/d" }}</span>{% endif %}
+                    </td>
+                    <td><input form="productForm{{ product.id }}" type="number" name="price" value="{{ product.price }}" class="num-small"></td>
+                    <td><input form="productForm{{ product.id }}" type="text" name="supplier" value="{{ product.supplier|default_if_none:'' }}" class="supplier-input"></td>
+                    <td><input form="productForm{{ product.id }}" type="number" name="lead_time" value="{{ product.lead_time }}" class="num-small" min="0"></td>
+                    <td><input form="productForm{{ product.id }}" type="number" name="order_lot" value="{{ product.order_lot }}" class="num-small" min="1"></td>
+                    <td><input form="productForm{{ product.id }}" type="number" name="safety_stock" value="{{ product.safety_stock }}" class="num-small" min="0"></td>
+                    <td><select form="productForm{{ product.id }}" name="trend_days" class="select-mid">{% for value, label in trend_days_choices %}<option value="{{ value }}" {% if product.trend_days == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
+                    <td><select form="productForm{{ product.id }}" name="lot_rule" class="select-mid">{% for value, label in lot_rule_choices %}<option value="{{ value }}" {% if product.lot_rule == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
+                    <td><select form="productForm{{ product.id }}" name="demand_source" class="select-mid">{% for value, label in company_choices %}<option value="{{ value }}" {% if product.demand_source == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
+                    <td class="check-cell"><input form="productForm{{ product.id }}" type="checkbox" name="is_excluded" {% if product.is_excluded %}checked{% endif %}></td>
+                    <td class="check-cell"><input form="productForm{{ product.id }}" type="checkbox" name="is_discontinued" {% if product.is_discontinued %}checked{% endif %}></td>
+                    <td class="check-cell"><input form="productForm{{ product.id }}" type="checkbox" name="allow_dead_order" {% if product.allow_dead_order %}checked{% endif %}></td>
+                    <td>
+                        <form method="POST" action="{% url 'delete_product' product.id %}" onsubmit="return confirm('商品を削除しますか？');">
+                            {% csrf_token %}
+                            <button type="submit" class="danger">削除</button>
+                        </form>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="17" style="text-align: center; padding: 18px;">商品がありません。</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="pager">
+        {% if page_obj.has_previous %}<a class="btn" href="?current_company={{ current_company }}&search_query={{ search_query }}&product_prefix={{ product_prefix }}&product_sort={{ product_sort }}&product_order={{ product_order }}{% if show_discontinued %}&show_discontinued=1{% endif %}&page={{ page_obj.previous_page_number }}">前へ</a>{% endif %}
+        <span>{{ page_obj.number }} / {{ page_obj.paginator.num_pages }} ページ（{{ page_obj.paginator.count }} 件）</span>
+        {% if page_obj.has_next %}<a class="btn" href="?current_company={{ current_company }}&search_query={{ search_query }}&product_prefix={{ product_prefix }}&product_sort={{ product_sort }}&product_order={{ product_order }}{% if show_discontinued %}&show_discontinued=1{% endif %}&page={{ page_obj.next_page_number }}">次へ</a>{% endif %}
+    </div>
+</body>
+</html>

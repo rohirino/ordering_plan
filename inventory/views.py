@@ -75,6 +75,10 @@ def _parse_csv_date(value):
     if not text:
         return None
     text = ' '.join(text.split())
+    if '/' in text:
+        parts = [part.strip() for part in text.split('/')]
+        if len(parts) == 3 and all(parts):
+            text = '/'.join(parts)
     for fmt in ('%Y/%m/%d', '%Y-%m-%d', '%Y年 %m月 %d日', '%Y年%m月%d日'):
         try:
             return datetime.datetime.strptime(text, fmt).date()
@@ -956,8 +960,10 @@ def import_arrivals_csv(request):
     current_company = request.POST.get('current_company', 'IKUJI')
     if request.method == 'POST' and request.FILES.get('csv_file'):
         try:
-            reader = _get_csv_reader(request.FILES['csv_file']); p_dict = {p.code: p for p in Product.objects.filter(owner_company=current_company)}
+            reader = _get_csv_reader(request.FILES['csv_file'])
+            p_dict = {p.code: p for p in Product.objects.all()}
             aggregated = {}
+            company_counts = {company_code: 0 for company_code, _ in Product.COMPANY_CHOICES}
             unknown_count, error_count, status_fixed_count = 0, 0, 0
             for row in reader:
                 code = _normalize_product_code(row.get('商品コード', ''))
@@ -976,7 +982,7 @@ def import_arrivals_csv(request):
                 status, status_was_fixed = _normalize_arrival_status(status_value)
                 if status_was_fixed:
                     status_fixed_count += 1
-                key = (code, ad, status)
+                key = (p_dict[code].id, ad, status)
                 aggregated[key] = aggregated.get(key, 0) + qty
 
             if not aggregated:
@@ -987,17 +993,25 @@ def import_arrivals_csv(request):
                 )
                 return redirect(request.META.get('HTTP_REFERER', '/arrivals/?current_company=' + current_company))
 
-            ArrivalSchedule.objects.filter(product__owner_company=current_company).delete()
+            ArrivalSchedule.objects.filter(product__owner_company__in=[company_code for company_code, _ in Product.COMPANY_CHOICES]).delete()
+            products_by_id = {p.id: p for p in p_dict.values()}
             create_list = [
-                ArrivalSchedule(product=p_dict[code], arrival_date=ad, quantity=qty, status=status)
-                for (code, ad, status), qty in aggregated.items()
+                ArrivalSchedule(product=products_by_id[product_id], arrival_date=ad, quantity=qty, status=status)
+                for (product_id, ad, status), qty in aggregated.items()
             ]
+            for schedule in create_list:
+                company_counts[schedule.product.owner_company] = company_counts.get(schedule.product.owner_company, 0) + 1
             ArrivalSchedule.objects.bulk_create(create_list)
+            company_summary = " / ".join(
+                f"{label}: {company_counts.get(company_code, 0)}件"
+                for company_code, label in Product.COMPANY_CHOICES
+            )
             messages.success(
                 request,
-                f"入荷予定を集計して洗替更新しました！"
+                f"入荷予定を両社へ自動振分して洗替更新しました！"
                 f"（登録: {len(create_list)}件 / 商品未登録: {unknown_count}件 / "
-                f"日付数量エラー: {error_count}件 / ステータス補正: {status_fixed_count}件）"
+                f"日付数量エラー: {error_count}件 / ステータス補正: {status_fixed_count}件 / "
+                f"{company_summary}）"
             )
         except Exception as e: messages.error(request, f"エラー: {e}")
     return redirect(request.META.get('HTTP_REFERER', '/arrivals/?current_company=' + current_company))

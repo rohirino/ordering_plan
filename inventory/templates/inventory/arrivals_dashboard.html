@@ -82,7 +82,7 @@
             <a class="btn" href="{% url 'download_csv_template' 'arrivals' %}?current_company={{ current_company }}">雛形</a>
             <a class="btn" href="{% url 'export_arrivals_csv' %}?current_company={{ current_company }}">CSV出力</a>
             <input type="file" name="csv_file" accept=".csv" required>
-            <button type="submit" class="primary" onclick="return confirm('現在の入荷予定をCSV内容で洗替更新しますか？');">CSV洗替</button>
+            <button type="submit" class="primary" onclick="return confirm('両社の入荷予定をCSV内容で自動振分・洗替更新しますか？');">CSV自動振分・洗替</button>
         </form>
     </div>
 

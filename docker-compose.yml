@@ -3,16 +3,16 @@ services:
     image: postgres:16
     container_name: ordering_plan_postgres
     environment:
-      POSTGRES_DB: ordering_plan
-      POSTGRES_USER: ordering_plan
-      POSTGRES_PASSWORD: ordering_plan_local
+      POSTGRES_DB: ${POSTGRES_DB:-ordering_plan}
+      POSTGRES_USER: ${POSTGRES_USER:-ordering_plan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ordering_plan_local}
       TZ: Asia/Tokyo
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ordering_plan -d ordering_plan"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ordering_plan} -d ${POSTGRES_DB:-ordering_plan}"]
       interval: 10s
       timeout: 5s
       retries: 5

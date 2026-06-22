@@ -4,24 +4,45 @@
     <meta charset="UTF-8">
     <title>画面説明・運用ガイド</title>
     <style>
-        body { font-family: sans-serif; line-height: 1.7; color: #24292f; max-width: 1040px; margin: 0 auto; padding: 28px; background: #f6f8fa; }
-        .container { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 28px 36px; }
-        .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
-        .btn { border: 1px solid #adb5bd; background: #fff; color: #212529; padding: 6px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; text-decoration: none; }
-        .btn.primary { background: #495057; border-color: #495057; color: #fff; }
-        h1 { margin: 0 0 8px; font-size: 26px; }
-        h2 { margin-top: 30px; border-bottom: 1px solid #d0d7de; padding-bottom: 6px; font-size: 19px; }
-        h3 { margin-top: 20px; font-size: 15px; color: #495057; }
-        p, li { font-size: 14px; }
-        ul, ol { padding-left: 22px; }
-        .flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 14px 0; }
-        .step { border: 1px solid #d0d7de; border-radius: 6px; padding: 12px; background: #fff; }
-        .step strong { display: block; margin-bottom: 4px; }
-        .note { background: #fff9db; border: 1px solid #ffe066; border-radius: 6px; padding: 12px; }
-        .muted { color: #57606a; font-size: 13px; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
-        th, td { border: 1px solid #d0d7de; padding: 8px; vertical-align: top; }
-        th { background: #f1f3f5; }
+        :root { --ink:#24292f; --muted:#57606a; --line:#d0d7de; --panel:#fff; --page:#f6f8fa; --accent:#b42318; --soft:#fff8c5; --code:#f6f8fa; }
+        * { box-sizing: border-box; }
+        body { font-family: sans-serif; line-height: 1.7; color:var(--ink); max-width:1180px; margin:0 auto; padding:24px; background:var(--page); }
+        .container { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:28px 36px 42px; }
+        .nav, .anchor-nav { display:flex; flex-wrap:wrap; gap:8px; }
+        .nav { margin-bottom:18px; }
+        .anchor-nav { padding:12px; background:#f6f8fa; border:1px solid var(--line); border-radius:6px; margin:18px 0 26px; }
+        .btn, .anchor-nav a { border:1px solid #adb5bd; background:#fff; color:#212529; padding:6px 12px; border-radius:4px; font-size:12px; font-weight:bold; text-decoration:none; }
+        .btn.primary { background:#495057; border-color:#495057; color:#fff; }
+        .anchor-nav a { color:#0a58ca; border-color:#c9d8ee; }
+        h1 { margin:0 0 6px; font-size:27px; }
+        h2 { margin:36px 0 14px; border-bottom:2px solid var(--line); padding-bottom:7px; font-size:20px; scroll-margin-top:16px; }
+        h3 { margin:22px 0 8px; font-size:16px; color:#343a40; }
+        h4 { margin:16px 0 5px; font-size:14px; }
+        p, li { font-size:14px; }
+        ul, ol { padding-left:24px; }
+        .lead { color:var(--muted); margin:0; }
+        .flow { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; margin:14px 0; }
+        .step { border:1px solid var(--line); border-radius:6px; padding:12px; background:#fff; }
+        .step strong { display:block; margin-bottom:4px; }
+        .note, .warning, .formula { border-radius:6px; padding:12px 14px; margin:12px 0; }
+        .note { background:#eef7ff; border:1px solid #a5d8ff; }
+        .warning { background:#fff5f5; border:1px solid #ffc9c9; }
+        .formula { background:var(--code); border:1px solid var(--line); font-family:monospace; white-space:pre-wrap; font-size:13px; line-height:1.8; }
+        .muted { color:var(--muted); font-size:13px; }
+        .badge { display:inline-block; padding:1px 7px; border-radius:99px; font-size:12px; font-weight:bold; background:#e9ecef; }
+        .badge.alert { background:#ffe3e3; color:#c92a2a; }
+        .badge.warn { background:#fff3bf; color:#7c5c00; }
+        .badge.ok { background:#d3f9d8; color:#2b5730; }
+        table { width:100%; border-collapse:collapse; font-size:13px; margin:10px 0 16px; }
+        th, td { border:1px solid var(--line); padding:8px; vertical-align:top; text-align:left; }
+        th { background:#f1f3f5; white-space:nowrap; }
+        code { background:#f1f3f5; padding:1px 4px; border-radius:3px; }
+        details { border:1px solid var(--line); border-radius:6px; margin:10px 0; overflow:hidden; }
+        summary { cursor:pointer; padding:10px 12px; font-weight:bold; background:#f8f9fa; }
+        .details-body { padding:4px 14px 12px; }
+        .checklist li { margin:5px 0; }
+        @media (max-width:700px) { body { padding:10px; } .container { padding:18px; } table { display:block; overflow-x:auto; } }
+        @media print { body { background:#fff; max-width:none; padding:0; } .container { border:0; padding:0; } .nav, .anchor-nav { display:none; } details { break-inside:avoid; } }
     </style>
 </head>
 <body>
@@ -37,92 +58,196 @@
         </div>
 
         <h1>画面説明・運用ガイド</h1>
-        <p class="muted">現在の5つのDashboardを前提に、日次・月次の運用手順と各画面の役割をまとめています。</p>
+        <p class="lead">販売実績、棚卸在庫、状態別資産、入荷予定をつなぎ、発注判断と棚卸報告を同じ商品コードで行うための実務ガイドです。</p>
 
-        <h2>1. 基本の運用フロー</h2>
-        <div class="flow">
-            <div class="step"><strong>1. 商品マスタを整える</strong>7桁の商品コードを基準に、LT、ロット、安全在庫、需要参照元、廃盤設定を確認します。</div>
-            <div class="step"><strong>2. 販売履歴を取り込む</strong>販売管理ソフトの売上明細CSVを取り込み、日付・得意先・商品・区分ごとの実績へ集計します。</div>
-            <div class="step"><strong>3. 入荷予定を更新する</strong>入荷予定・発注残Dashboardで両社混在CSVの自動振分洗替、または個別登録を行います。</div>
-            <div class="step"><strong>4. 棚卸資産評価を登録する</strong>月末棚卸CSVを取り込み、状態別在庫金額を確定します。</div>
-            <div class="step"><strong>5. 発注計画へ反映する</strong>販売在庫に含める状態だけを、在庫・発注計画Dashboardへ数量反映します。</div>
-            <div class="step"><strong>6. 欠品リスクを確認する</strong>未来120日間の在庫推移から、発注点割れと欠品リスクを確認します。</div>
+        <div class="anchor-nav">
+            <a href="#flow">日次・月次の流れ</a><a href="#dashboards">画面一覧</a><a href="#master">マスタ設定</a><a href="#calculation">計算式と判定</a><a href="#valuation">棚卸資産評価</a><a href="#imports">CSV取込</a><a href="#operations">運用チェック</a>
         </div>
 
-        <h2>2. 各Dashboardの使い方</h2>
+        <h2 id="flow">1. 全体の運用フロー</h2>
+        <div class="flow">
+            <div class="step"><strong>1. 商品を整備</strong>商品コード7桁単位で、会社、LT、ロット、安全在庫、長期ベース、需要参照元を設定します。</div>
+            <div class="step"><strong>2. 売上を更新</strong>日次販売履歴へ売上明細CSVを取り込み、需要予測の母数を更新します。</div>
+            <div class="step"><strong>3. 入荷予定を更新</strong>到着予定CSVを1回取り込みます。商品コードから両社へ自動振分されます。</div>
+            <div class="step"><strong>4. 月末棚卸を登録</strong>状態別・倉庫別に棚卸数量と原価を確定し、評価表を出力します。</div>
+            <div class="step"><strong>5. 販売在庫だけを反映</strong>状態ごとの反映可否を確認して、棚卸数量を発注計画用在庫へ反映します。</div>
+            <div class="step"><strong>6. 計画を確認</strong>120日先までの在庫推移、発注点割れ、欠品リスクを確認して発注計画を作成します。</div>
+        </div>
+        <div class="note"><strong>会社の切替:</strong> 日本育児とペットセレクトは商品・販売履歴・棚卸資産・入荷予定を会社単位で保持します。状態コード <code>400</code>、<code>401</code>、<code>404</code> は、棚卸CSV取込時にペットセレクト資産として自動登録されます。</div>
+
+        <h2 id="dashboards">2. Dashboardごとの役割</h2>
         <table>
-            <tr><th>画面</th><th>主な操作</th><th>注意点</th></tr>
-            <tr>
-                <td>在庫・発注計画</td>
-                <td>需要予測、欠品リスク確認、発注計画生成、商品別パラメータの個別調整。</td>
-                <td>在庫の起点は、棚卸資産評価または在庫CSVから反映された現在庫です。CSV登録や入荷予定登録は各専用Dashboardから行います。</td>
-            </tr>
-            <tr>
-                <td>商品マスタ登録</td>
-                <td>商品登録、CSV取込、ソート、一括更新、LT・ロット・安全在庫・需要参照元・廃盤の設定。</td>
-                <td>棚卸CSVから自動生成・更新された商品は「棚卸由来」列で確認できます。廃盤品は原則非表示で、商品コード前3桁でも絞り込めます。</td>
-            </tr>
-            <tr>
-                <td>日次販売履歴</td>
-                <td>売上明細CSVの取込、CSV出力、期間削除、販売履歴の検索・確認。</td>
-                <td>販売履歴は需要予測の基礎データです。直近データを継続して追加します。</td>
-            </tr>
-            <tr>
-                <td>入荷予定・発注残</td>
-                <td>入荷予定CSVの自動振分洗替、個別追加、数量・日付・確度の修正。</td>
-                <td>CSV洗替は商品コードから会社を判定し、日本育児・ペットセレクト両社の入荷予定を置き換える運用です。必ず最新の全件を取り込んでください。</td>
-            </tr>
-            <tr>
-                <td>棚卸資産評価</td>
-                <td>棚卸CSV取込、状態マスタ取込、状態別フィルタ、発注計画反映の個別・一括更新、Excel/PDF出力。</td>
-                <td>B品など販売在庫に適さない状態は、発注計画反映を除外してから数量反映します。</td>
-            </tr>
+            <tr><th>画面</th><th>主な役割</th><th>通常の利用頻度</th><th>判断時の注意</th></tr>
+            <tr><td>在庫・発注計画</td><td>需要予測、在庫推移、発注点判定、発注計画の作成・進捗管理。</td><td>日次</td><td>ここに表示される在庫は、棚卸資産評価から反映した「販売在庫」です。</td></tr>
+            <tr><td>商品マスタ登録</td><td>商品と発注パラメータ、状態コードマスタの登録・一括更新。</td><td>随時</td><td>LT、ロット、安全在庫、長期ベースは計算結果を直接変えます。</td></tr>
+            <tr><td>日次販売履歴</td><td>売上明細の取込、売上数量・金額・粗利の確認。</td><td>日次または週次</td><td>需要予測は販売数量を使います。金額・粗利は確認用です。</td></tr>
+            <tr><td>入荷予定・発注残</td><td>確定・高確度・希望の入荷予定を管理。</td><td>日次</td><td>予測計算に加算されるのは「確定」「高確度」のみです。</td></tr>
+            <tr><td>棚卸資産評価</td><td>状態別の数量・原価・在庫金額、倉庫別在庫、月次報告書。</td><td>月次</td><td>Ｂ品などを資産評価には含めつつ、発注計画用在庫からは除外できます。</td></tr>
         </table>
 
-        <h2>3. 商品コードと状態コード</h2>
-        <p>販売管理ソフトから出力される10桁コードは、左7桁が商品コード、右3桁が状態コードです。このアプリでは、商品マスタは7桁の商品単位で管理し、棚卸資産評価では3桁の状態コードごとに原価・数量・在庫金額を管理します。</p>
-        <div class="note">
-            例: 6460010001 は、商品コード 6460010、状態コード 001 として扱います。状態コード400、401、404はペットセレクト資産として自動登録するルールを持っています。
-        </div>
+        <h2 id="master">3. 商品・状態マスタの設定</h2>
+        <h3>商品コードと状態コード</h3>
+        <p>販売管理ソフトの10桁コードは、左7桁を商品コード、右3桁を状態コードとして扱います。商品マスタと販売需要は7桁単位、棚卸資産評価は「7桁商品コード + 3桁状態コード」単位です。</p>
+        <div class="formula">例: 0040008912
+商品コード = 0040008
+状態コード = 912
+発注計画の需要・発注は商品コード 0040008 単位で判定</div>
 
-        <h2>4. 棚卸資産評価から発注計画へ流す手順</h2>
-        <ol>
-            <li>棚卸資産評価Dashboardで対象会社と棚卸日を選びます。</li>
-            <li>棚卸CSVを取り込みます。未登録の商品は商品マスタへ自動生成されます。</li>
-            <li>状態マスタCSVを取り込むと、状態コードに対応する状態名を補完できます。</li>
-            <li>状態コード別明細で、状態コード・状態名・発注計画反映状態を使って絞り込みます。</li>
-            <li>B品など販売在庫に含めない状態は、個別または「表示中を除外」で発注計画から除外します。</li>
-            <li>「発注計画へ数量反映」を押すと、含める状態だけが在庫・発注計画Dashboardの現在庫へ反映されます。</li>
-        </ol>
+        <table>
+            <tr><th>設定項目</th><th>意味</th><th>計算への影響</th><th>設定の目安</th></tr>
+            <tr><td>所有会社</td><td>資産・在庫・発注計画をどちらの会社へ計上するか。</td><td>表示、棚卸、入荷予定、発注計画の所属を決めます。</td><td>資産の帰属に合わせます。</td></tr>
+            <tr><td>需要参照元</td><td>どちらの会社の販売履歴から需要を読むか。</td><td>需要計算に使う売上実績の会社を決めます。</td><td>販売実績を持つ会社を選びます。</td></tr>
+            <tr><td>LT</td><td>発注してから販売可能在庫になるまでの日数。</td><td>発注点 = 日次需要 × LT + 安全在庫。</td><td>発注から倉庫入庫までの実績日数で設定します。</td></tr>
+            <tr><td>発注ロット</td><td>発注可能な最小単位または丸め単位。</td><td>必要数量をロット単位へ丸めます。</td><td>仕入先の発注条件を設定します。</td></tr>
+            <tr><td>安全在庫</td><td>欠品を防ぐために残したい最低在庫。</td><td>発注点に加算されます。</td><td>需要のばらつき・供給不安定さが大きいほど増やします。</td></tr>
+            <tr><td>長期ベース</td><td>90 / 120 / 150 / 180日の基礎需要期間。</td><td>長期日次需要とABC/DEAD判定に使います。</td><td>季節性や販売開始時期を考慮して選びます。</td></tr>
+            <tr><td>管理外</td><td>発注判断の対象から外すフラグ。</td><td>在庫・発注計画画面の計算と表示から除外されます。</td><td>社内使用、サンプル、管理対象外に使います。</td></tr>
+            <tr><td>廃盤</td><td>通常の一覧から隠すフラグ。</td><td>原則として発注計画・一覧から非表示になります。</td><td>終売後に設定し、必要なときだけ「廃盤も表示」で確認します。</td></tr>
+        </table>
 
-        <h2>5. 発注計画の考え方</h2>
+        <details open>
+            <summary>状態コードの「発注計画反映」設定</summary>
+            <div class="details-body">
+                <p>状態別SKUごとに、棚卸数量を発注計画用の在庫へ含めるかを設定します。資産評価には全状態を残し、販売可能な状態だけを発注計画に流せます。</p>
+                <ul>
+                    <li><strong>含める:</strong> 販売でき、発注判断上も在庫として数えてよい状態。</li>
+                    <li><strong>除外:</strong> Ｂ品、破損品、保留品、展示品など、資産としては残すが通常販売在庫に数えない状態。</li>
+                    <li>「表示中を含める／除外」で、状態コード・状態名のフィルタ結果だけを一括変更できます。</li>
+                </ul>
+            </div>
+        </details>
+
+        <h2 id="calculation">4. 発注計画の計算式と判定根拠</h2>
+        <p>計画の基準日は、対象会社の最新棚卸日があれば<strong>その翌日</strong>、棚卸日が未登録なら<strong>当日</strong>です。この基準日から120日間を日ごとに試算します。</p>
+
+        <h3>4-1. 基礎需要とトレンド倍率</h3>
+        <p>商品ごとに設定された長期ベース日数を <code>T</code>（90 / 120 / 150 / 180日）、その期間の販売数量を <code>S_long</code>、直近30日の販売数量を <code>S_30</code> とします。</p>
+        <div class="formula">長期日次需要 D_long = S_long / T
+直近日次需要 D_30   = S_30 / 30
+
+生トレンド R = D_30 / D_long
+  ただし D_long = 0 のときは R = 1.00
+
+適用トレンド M = min(トレンド上限, max(トレンド下限, R))
+予測日次需要 D = D_long × M
+
+初期値: トレンド下限 0.50、トレンド上限 2.00</div>
+        <p>つまり、直近の販売が長期平均より速ければ予測需要を増やし、鈍ければ減らします。ただし極端な一時変動で予測が振れすぎないよう、商品ごとの上限・下限で止めます。</p>
+        <div class="note"><strong>例:</strong> 90日で900個、直近30日で450個なら、<code>D_long = 10個/日</code>、<code>D_30 = 15個/日</code>、<code>R = 1.50</code>です。上限2.00・下限0.50なら、予測日次需要は <code>10 × 1.50 = 15個/日</code> になります。</div>
+
+        <h3>4-2. 発注点</h3>
+        <div class="formula">発注点 OP = 予測日次需要 D × リードタイム LT + 安全在庫 SS</div>
+        <p>発注してから入荷するまでに消費する見込み数量と、入荷後も残しておきたい安全在庫の合計です。現在庫または将来予測在庫がこの水準以下になると、<span class="badge warn">発注点割れ</span>として表示します。</p>
+        <div class="note"><strong>例:</strong> 予測日次需要15個、LT30日、安全在庫100個の場合、発注点は <code>15 × 30 + 100 = 550個</code> です。</div>
+
+        <h3>4-3. 120日先までの在庫推移</h3>
+        <div class="formula">翌日の予測在庫 = 前日の予測在庫
+                  + 入荷予定数量（確定 + 高確度）
+                  - max(出荷予定数量, 予測日次需要 D)</div>
         <ul>
-            <li>長期ベース期間の販売数から、1日あたりの基礎需要を計算します。</li>
-            <li>直近30日の販売速度と長期ベースの販売速度を比較し、勢いとしてトレンド倍率を見ます。</li>
-            <li>発注点は、需要、リードタイム、安全在庫を使って判断します。</li>
-            <li>発注数量は、発注ロットと超過時ルールをもとに丸めます。</li>
-            <li>廃盤品、処分推奨品、管理外商品は、誤発注を避けるため通常の表示や計算対象から外せます。</li>
+            <li><strong>入荷予定:</strong> 「確定」と「高確度」を加算します。「希望」は画面に表示しますが、計算には加算しません。</li>
+            <li><strong>消費数量:</strong> 出荷予定が登録されている日は、出荷予定と予測日次需要の大きい方を消費として採用します。</li>
+            <li><strong>欠品リスク:</strong> 120日間のどこかで予測在庫が0以下になった場合。</li>
+            <li><strong>発注点割れ:</strong> 欠品には至らないが、予測在庫が発注点以下になった場合。</li>
+            <li><strong>期限表示:</strong> 初めて0以下になる予測日からLTを差し引き、基準日から見て何日以内に発注判断が必要かを表します。</li>
+        </ul>
+        <div class="warning"><strong>重要:</strong> この画面は発注判断を支援する予測です。未登録の大口受注・返品・倉庫間移動・生産遅延は自動では反映されません。判断前に入荷予定と特記事項を確認してください。</div>
+
+        <h3>4-4. 自動作成する発注数量</h3>
+        <p>120日予測の最小在庫を <code>MinStock</code> としたとき、発注点まで戻す不足数を計算します。</p>
+        <div class="formula">不足数 Shortage = max(0, OP - MinStock)
+
+ロット積上げ: 発注数 = ceil(Shortage / Lot) × Lot
+最小ロットのみ: 発注数 = max(Lot, ceil(Shortage))</div>
+        <p>「ロット積上げ」はロット倍数に切り上げます。「最小ロットのみ」は不足数がロットを超える場合に不足数そのものを発注し、ロット未満だけを最低ロットまで引き上げます。作成された計画はまず「計画中」で登録され、確認後に「発注済」、入庫後に「入庫済」へ更新します。</p>
+
+        <h3>4-5. 安全在庫の提案値</h3>
+        <p>画面に表示される提案値は自動保存されません。設定見直しの参考値です。</p>
+        <div class="formula">ばらつき V = max(|D_30 - D_long|, D × 0.30)
+提案安全在庫 = ceil(1.65 × V × sqrt(LT))
+表示範囲: 最低10個、最高300個</div>
+        <p><code>1.65</code>は、おおむね95%水準のサービスレベルを意識した係数です。季節商品・輸入遅延・欠品許容度など、数式に入らない事情は担当者判断で調整してください。</p>
+
+        <h3>4-6. ABCランクと処分推奨</h3>
+        <ul>
+            <li>廃盤でない商品を、各商品の長期ベース期間の販売数量が多い順に並べます。</li>
+            <li>累積販売構成比が70%以下をA、95%以下をB、それ以外をCとします。</li>
+            <li>設定した長期ベース期間の販売が0で、現在庫が1個以上ある商品は <span class="badge">DEAD（処分推奨）</span> に上書きします。</li>
+            <li>DEAD商品は通常発注を止めます。「例外発注を許可」を明示的にONにしたときだけ、発注候補・KPIに含めます。</li>
         </ul>
 
-        <h2>6. 日次作業</h2>
-        <ol>
-            <li>販売管理ソフトから売上明細CSVを出力します。</li>
-            <li>日次販売履歴Dashboardから販売履歴CSVを取り込みます。</li>
-            <li>入荷予定・発注残Dashboardで、両社混在の入荷予定CSVを一度だけ取り込みます。</li>
-            <li>欠品リスク、発注点割れ、発注計画候補を確認します。</li>
+        <h2 id="valuation">5. 棚卸資産評価と発注計画在庫の連携</h2>
+        <h3>棚卸資産評価の計算</h3>
+        <div class="formula">状態別・倉庫別在庫金額 = 棚卸数量 × 状態別原価
+商品別在庫金額           = 状態別・倉庫別在庫金額の合計
+倉庫別在庫金額           = その倉庫に属する明細の合計</div>
+        <p>同じ商品でも状態コードが異なれば、原価・数量・在庫金額を別々に保持します。棚卸日ごとの原価は履歴として残るため、月ごとの評価額推移を追えます。</p>
+
+        <h3>棚卸CSVから発注計画へ反映する手順</h3>
+        <ol class="checklist">
+            <li>対象会社と棚卸日を選び、棚卸CSVを取り込みます。</li>
+            <li>未登録商品は商品マスタに自動生成されます。商品名がCSVと異なる場合は更新履歴も残ります。</li>
+            <li>状態マスタCSVを取り込み、状態名を整えます。</li>
+            <li>状態別明細をフィルタし、販売に数えない状態を「除外」にします。</li>
+            <li>「発注計画へ数量反映」を実行します。</li>
+            <li>在庫・発注計画で現在庫と倉庫別内訳、欠品リスクを確認します。</li>
+        </ol>
+        <div class="formula">発注計画へ反映する商品在庫 =
+同じ商品コードのうち「発注計画反映 = 含める」の状態別・倉庫別数量合計</div>
+        <div class="warning">反映ボタンは、選択した棚卸日・会社の在庫を発注計画用在庫として更新します。棚卸日や会社を取り違えないよう、実行前に上部の選択状態を確認してください。</div>
+
+        <h2 id="imports">6. CSV取込とデータ更新のルール</h2>
+        <table>
+            <tr><th>対象</th><th>取込の単位</th><th>重複時の扱い</th><th>確認場所</th></tr>
+            <tr><td>商品マスタ</td><td>商品コード7桁</td><td>同じコードは商品・パラメータを更新。</td><td>商品マスタ登録の一覧と取込ログ。</td></tr>
+            <tr><td>日次販売履歴</td><td>会社、伝票日付、得意先コード、商品コード7桁、区分</td><td>同じキーは数量・税抜金額・粗利金額を更新。</td><td>日次販売履歴の検索と取込ログ。</td></tr>
+            <tr><td>入荷予定</td><td>商品コード、入荷日、確度</td><td>CSV取込は両社の入荷予定を商品コードで自動振分して洗替。</td><td>入荷予定・発注残の一覧と取込ログ。</td></tr>
+            <tr><td>棚卸資産評価</td><td>棚卸日、商品7桁、状態3桁、倉庫、所有会社</td><td>同じ棚卸日・会社の明細をCSV内容で更新。</td><td>棚卸資産評価の明細と取込ログ。</td></tr>
+            <tr><td>状態マスタ</td><td>状態コード3桁</td><td>同じ状態コードは状態名を更新し、既存明細の状態名にも反映。</td><td>商品マスタ登録の状態コードマスタ。</td></tr>
+        </table>
+        <details>
+            <summary>取込時に見るべきポイント</summary>
+            <div class="details-body">
+                <ul>
+                    <li>各Dashboardの「取込ログを確認する」で、成功・警告・失敗、対象件数、エラー例を確認します。</li>
+                    <li>商品未登録、日付形式不正、数量形式不正などは警告として残ります。警告がある場合は件数と明細を確認します。</li>
+                    <li>販売管理ソフトの売上明細は、先頭のタイトル行があっても、伝票日付・商品名・数量を含むヘッダ行を自動で探します。</li>
+                    <li>入荷予定CSVは、会社で分けずに両社混在の全件ファイルを一度取り込みます。片方だけのファイルを洗替すると、もう片方の予定も消えるため注意します。</li>
+                </ul>
+            </div>
+        </details>
+
+        <h2 id="operations">7. 日次・月次の実務チェックリスト</h2>
+        <h3>日次または週次</h3>
+        <ol class="checklist">
+            <li>日次販売履歴に最新の売上明細CSVを取り込み、取込ログで警告件数を確認します。</li>
+            <li>入荷予定・発注残に最新の到着予定表を取り込み、未登録商品・日付不正がないか確認します。</li>
+            <li>在庫・発注計画で、<span class="badge alert">欠品リスク</span>、<span class="badge warn">発注点割れ</span>、DEAD商品を確認します。</li>
+            <li>必要な商品だけ「発注」を実行し、計画中一覧を確認後に発注済へ進めます。</li>
+            <li>実際に入庫したら、該当の計画を入庫済へ更新します。</li>
         </ol>
 
-        <h2>7. 月次作業</h2>
-        <ol>
-            <li>月末棚卸一覧を棚卸資産評価CSVの形に整えます。</li>
-            <li>棚卸資産評価Dashboardへ取り込みます。</li>
-            <li>状態別の発注計画反映設定を確認します。</li>
-            <li>在庫・発注計画へ数量反映します。</li>
-            <li>必要に応じてExcel/PDFを出力し、棚卸報告書として確認します。</li>
+        <h3>月次（棚卸日）</h3>
+        <ol class="checklist">
+            <li>棚卸CSVと状態マスタCSVを準備します。</li>
+            <li>棚卸資産評価へ取り込み、在庫数量合計・在庫金額合計・倉庫別在庫金額を確認します。</li>
+            <li>Ｂ品・保留品などの「発注計画反映」を確認します。</li>
+            <li>発注計画へ数量反映を実行します。</li>
+            <li>在庫・発注計画で基準日、現在庫、120日予測を確認します。</li>
+            <li>必要に応じて棚卸資産評価のExcel/PDFを報告書として出力します。</li>
         </ol>
 
-        <h2>8. 管理画面の使い分け</h2>
-        <p>Django管理画面は、通常運用では使わない直接編集用の裏口です。日々の登録や修正は各Dashboardから行い、管理画面はデータ確認、緊急修正、開発・保守時の確認に限定してください。</p>
+        <h2>8. よくある確認ポイント</h2>
+        <table>
+            <tr><th>症状</th><th>最初に確認すること</th></tr>
+            <tr><td>需要が0、または不自然に小さい</td><td>商品マスタの需要参照元、販売履歴の会社、商品コード7桁の一致、長期ベース期間を確認します。</td></tr>
+            <tr><td>入荷予定が予測在庫に加算されない</td><td>入荷日が120日以内か、確度が「確定」または「高確度」か、商品コードが一致しているかを確認します。</td></tr>
+            <tr><td>Ｂ品が在庫に含まれてしまう</td><td>棚卸資産評価の状態別明細で、その状態コードを「発注計画反映 = 除外」にしてから再反映します。</td></tr>
+            <tr><td>棚卸在庫と発注計画の現在庫が違う</td><td>状態別の除外分、対象会社、対象棚卸日、倉庫別明細、反映実行の有無を確認します。</td></tr>
+            <tr><td>発注候補が出ない</td><td>廃盤・管理外・DEAD判定、例外発注許可、在庫・入荷予定・LT・安全在庫を確認します。</td></tr>
+        </table>
+
+        <div class="note"><strong>運用の原則:</strong> 商品・販売・入荷・棚卸の各データは専用Dashboardで更新し、Django管理画面は緊急修正や保守確認に限定します。変更前後の取込ログと出力帳票を残すと、数値差異の追跡が容易になります。</div>
     </div>
 </body>
 </html>

@@ -5,8 +5,10 @@ raw_sales_data.csv
 
 # ローカル環境で作るものはGitHubに送らない
 venv/
+.venv/
 db.sqlite3
 *.sqlite3
+.env
 
 # Python/Djangoの生成物
 __pycache__/
@@ -17,3 +19,4 @@ __pycache__/
 
 # ローカルバックアップ
 *_backup_*/
+backups/

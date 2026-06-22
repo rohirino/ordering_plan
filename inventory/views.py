@@ -129,6 +129,18 @@ def _status_from_counts(error_count=0, warning_count=0):
         return 'warning'
     return 'success'
 
+
+def _pagination_context(request, page_obj, button_class='btn'):
+    query_params = request.GET.copy()
+    query_params.pop('page', None)
+    query = query_params.urlencode()
+    return {
+        'pagination_query': f'{query}&' if query else '',
+        'pagination_button_class': button_class,
+        'page_jump_back': max(1, page_obj.number - 10),
+        'page_jump_forward': min(page_obj.paginator.num_pages, page_obj.number + 10),
+    }
+
 def _build_arrival_map(queryset):
     arr_map = {}
     for a in queryset:
@@ -376,7 +388,18 @@ def planning_dashboard(request):
             item.status_alert = f"🚨 欠品リスク{suffix}" if has_shortage_risk else f"⚠️ 発注点割れ{suffix}" if has_order_point_risk else f"正常{suffix}"
             item.needs_order = has_shortage_risk or has_order_point_risk
         visible_inventories.append(item)
-    return render(request, 'inventory/dashboard.html', {'inventories': visible_inventories, 'page_obj': page_obj, 'date_list': date_list, 'active_months': active_months, 'search_query': search_query, 'inventory_date_choices': inventory_date_choices, 'active_orders': active_orders, 'abc_filter': abc_filter, 'supplier_code': supplier_code, 'show_discontinued': show_discontinued, 'current_company': current_company, 'active_filter': active_filter, 'all_warehouses': all_warehouses, 'ikuji_warehouses': ikuji_warehouses, 'shared_wh_ids': shared_wh_ids, 'kpi_shortage_cnt': kpi_shortage_cnt, 'kpi_order_point_cnt': kpi_order_point_cnt, 'import_logs': _recent_import_logs('planning')})
+    return render(request, 'inventory/dashboard.html', {
+        'inventories': visible_inventories, 'page_obj': page_obj, 'date_list': date_list,
+        'active_months': active_months, 'search_query': search_query,
+        'inventory_date_choices': inventory_date_choices, 'active_orders': active_orders,
+        'abc_filter': abc_filter, 'supplier_code': supplier_code,
+        'show_discontinued': show_discontinued, 'current_company': current_company,
+        'active_filter': active_filter, 'all_warehouses': all_warehouses,
+        'ikuji_warehouses': ikuji_warehouses, 'shared_wh_ids': shared_wh_ids,
+        'kpi_shortage_cnt': kpi_shortage_cnt, 'kpi_order_point_cnt': kpi_order_point_cnt,
+        'import_logs': _recent_import_logs('planning'),
+        **_pagination_context(request, page_obj, button_class='page-btn'),
+    })
 
 def product_master_dashboard(request):
     current_company = request.GET.get('current_company', 'IKUJI')
@@ -446,6 +469,7 @@ def product_master_dashboard(request):
         'trend_days_choices': Product.TREND_DAYS_CHOICES,
         'company_choices': Product.COMPANY_CHOICES,
         'import_logs': _recent_import_logs('product_master'),
+        **_pagination_context(request, page_obj),
     })
 
 def arrivals_dashboard(request):
@@ -471,6 +495,7 @@ def arrivals_dashboard(request):
         'page_obj': page_obj,
         'status_choices': ArrivalSchedule.STATUS_CHOICES,
         'import_logs': _recent_import_logs('arrivals'),
+        **_pagination_context(request, page_obj),
     })
 
 def sales_history_dashboard(request):
@@ -556,6 +581,7 @@ def sales_history_dashboard(request):
         'totals': totals,
         'import_logs': _recent_import_logs('sales_history'),
         'latest_skip_log': latest_skip_log,
+        **_pagination_context(request, page_obj),
     })
 
 def _filter_valuation_variant_rows(variant_rows, params):

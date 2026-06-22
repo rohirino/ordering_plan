@@ -1,0 +1,19 @@
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="pager pagination-controls">
+    {% if page_obj.has_previous %}
+        <a class="{{ pagination_button_class }}" href="?{{ pagination_query }}page=1">最初</a>
+        <a class="{{ pagination_button_class }}" href="?{{ pagination_query }}page={{ page_jump_back }}">10前</a>
+        <a class="{{ pagination_button_class }}" href="?{{ pagination_query }}page={{ page_obj.previous_page_number }}">前へ</a>
+    {% endif %}
+    <span class="pagination-status">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }} ページ（{{ page_obj.paginator.count }} 件）</span>
+    <form class="pagination-jump" onsubmit="const page = this.elements.page.value; const url = new URL(window.location.href); url.searchParams.set('page', page); window.location.assign(url); return false;">
+        <input type="number" name="page" min="1" max="{{ page_obj.paginator.num_pages }}" value="{{ page_obj.number }}" aria-label="移動するページ">
+        <button type="submit" class="{{ pagination_button_class }}">移動</button>
+    </form>
+    {% if page_obj.has_next %}
+        <a class="{{ pagination_button_class }}" href="?{{ pagination_query }}page={{ page_jump_forward }}">10次</a>
+        <a class="{{ pagination_button_class }}" href="?{{ pagination_query }}page={{ page_obj.next_page_number }}">次へ</a>
+        <a class="{{ pagination_button_class }}" href="?{{ pagination_query }}page={{ page_obj.paginator.num_pages }}">最後</a>
+    {% endif %}
+</div>
+{% endif %}

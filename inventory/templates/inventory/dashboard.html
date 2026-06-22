@@ -39,6 +39,10 @@
         .status-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 10px; }
         .inline-input { padding: 2px 4px; font-size: 11px; border: 1px solid #ced4da; border-radius: 3px; font-weight: bold; }
         .page-btn { padding: 4px 10px; border: 1px solid #ced4da; background: white; text-decoration: none; color: #495057; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: pointer; }
+        .pagination-controls { margin-top: 10px; flex-shrink: 0; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 13px; background: #fff; padding: 8px; border-top: 1px solid #dee2e6; }
+        .pagination-status { font-weight: bold; color: #495057; background: #e9ecef; padding: 4px 10px; border-radius: 4px; white-space: nowrap; }
+        .pagination-jump { display: flex; align-items: center; gap: 3px; margin: 0; }
+        .pagination-jump input { width: 54px; padding: 4px; border: 1px solid #ced4da; border-radius: 4px; text-align: right; font-size: 12px; }
         .rank-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 12px; font-weight: bold; color: white; }
         .company-tab-box { display: flex; gap: 4px; margin-bottom: 8px; border-bottom: 2px solid #dee2e6; padding-bottom: 1px; }
         .company-tab { padding: 6px 20px; border: 1px solid #ced4da; border-bottom: none; background-color: #e9ecef; color: #495057; text-decoration: none; font-size: 13px; font-weight: bold; border-top-left-radius: 4px; border-top-right-radius: 4px; }
@@ -402,19 +406,7 @@
         </table>
     </div>
 
-    <div style="margin-top: 10px; flex-shrink: 0; display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 13px; background: #fff; padding: 8px; border-top: 1px solid #dee2e6;">
-        {% if page_obj.has_previous %}
-            <button type="button" onclick="changePage(1)" class="page-btn">« 最初</button>
-            <button type="button" onclick="changePage({{ page_obj.previous_page_number }})" class="page-btn">‹ 前へ</button>
-        {% endif %}
-        <span style="font-weight: bold; color: #495057; background: #e9ecef; padding: 4px 12px; border-radius: 20px;">
-            {{ page_obj.number }} / {{ page_obj.paginator.num_pages }} ページ (該当商品: 全 {{ page_obj.paginator.count }} 件)
-        </span>
-        {% if page_obj.has_next %}
-            <button type="button" onclick="changePage({{ page_obj.next_page_number }})" class="page-btn">次へ ›</button>
-            <button type="button" onclick="changePage({{ page_obj.paginator.num_pages }})" class="page-btn">最後 »</button>
-        {% endif %}
-    </div>
+    {% include 'inventory/partials/pagination.html' %}
 
     <div id="graphModal" class="modal">
         <div class="modal-content"><span class="close-btn" onclick="closeModal()">&times;</span><h3 id="modalTitle" style="margin-top: 0; color: #333;">商品別 在庫予測推移</h3><div style="position: relative; width: 100%; height: 400px;"><canvas id="predictionChart"></canvas></div></div>
@@ -426,9 +418,6 @@
         
         // 一括選択スクリプト
         function toggleSelectAll(master) { const checkboxes = document.querySelectorAll('.item-checkbox'); checkboxes.forEach(cb => cb.checked = master.checked); }
-        // パラメータ保持ページネーション
-        function changePage(pageNum) { const url = new URL(window.location.href); url.searchParams.set('page', pageNum); window.location.href = url.toString(); }
-
         let myChart = null;
         function openGraphModal(productName, stockData, dateLabels, orderPoint, safetyStock) {
             document.getElementById('graphModal').style.display = "block";

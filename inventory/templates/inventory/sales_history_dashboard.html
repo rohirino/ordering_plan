@@ -53,6 +53,10 @@
         .name { min-width: 280px; }
         .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
         .pager { display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 13px; }
+        .pagination-controls { flex-wrap: wrap; padding: 4px 0; }
+        .pagination-status { font-weight: bold; color: #495057; white-space: nowrap; }
+        .pagination-jump { display: flex; align-items: center; gap: 3px; margin: 0; }
+        .pagination-jump input { width: 54px; padding: 4px; text-align: right; }
     </style>
 </head>
 <body class="{% if current_company == 'IKUJI' %}company-ikuji{% else %}company-select{% endif %}">
@@ -165,10 +169,6 @@
         </table>
     </div>
 
-    <div class="pager">
-        {% if page_obj.has_previous %}<a class="btn" href="?current_company={{ current_company }}&search_query={{ search_query }}&product_prefix={{ product_prefix }}&summary_period={{ summary_period }}&date_from={{ date_from }}&date_to={{ date_to }}&sales_category={{ sales_category }}&page={{ page_obj.previous_page_number }}">前へ</a>{% endif %}
-        <span>{{ page_obj.number }} / {{ page_obj.paginator.num_pages }} ページ（{{ page_obj.paginator.count }} 件）</span>
-        {% if page_obj.has_next %}<a class="btn" href="?current_company={{ current_company }}&search_query={{ search_query }}&product_prefix={{ product_prefix }}&summary_period={{ summary_period }}&date_from={{ date_from }}&date_to={{ date_to }}&sales_category={{ sales_category }}&page={{ page_obj.next_page_number }}">次へ</a>{% endif %}
-    </div>
+    {% include 'inventory/partials/pagination.html' %}
 </body>
 </html>

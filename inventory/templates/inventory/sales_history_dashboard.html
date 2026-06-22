@@ -5,8 +5,9 @@
     <meta charset="UTF-8">
     <title>日次販売履歴Dashboard</title>
     <style>
-        html, body { margin: 0; padding: 0; height: 100%; font-family: sans-serif; background: #f6f8fa; color: #212529; }
+        html, body { margin: 0; padding: 0; height: 100%; font-family: sans-serif; background: #fff5f5; color: #212529; }
         body { padding: 18px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; }
+        body.company-select { background: #f5f9ff; }
         .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
         h1 { margin: 0; font-size: 22px; }
         h2 { margin: 0 0 8px 0; font-size: 16px; }
@@ -15,12 +16,15 @@
         .nav-group:first-child { border-left: 0; padding-left: 0; }
         .nav-label { font-size: 10px; font-weight: bold; color: #6c757d; }
         .btn, button { border: 1px solid #adb5bd; background: #fff; color: #212529; padding: 5px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; text-decoration: none; cursor: pointer; white-space: nowrap; }
-        .btn.primary, button.primary { background: #495057; border-color: #495057; color: #fff; }
+        .btn.primary, button.primary { background: #c92a2a; border-color: #c92a2a; color: #fff; }
+        body.company-select .btn.primary, body.company-select button.primary { background: #1864ab; border-color: #1864ab; }
         .btn.danger, button.danger { background: #dc3545; border-color: #dc3545; color: #fff; }
         .company-tabs { display: flex; gap: 4px; border-bottom: 2px solid #dee2e6; }
         .company-tab { padding: 7px 18px; border: 1px solid #ced4da; border-bottom: 0; background: #e9ecef; color: #495057; text-decoration: none; font-size: 13px; font-weight: bold; border-radius: 4px 4px 0 0; }
-        .company-tab.active { background: #495057; color: #fff; border-color: #495057; }
-        .panel { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: 10px; }
+        .company-tab.active { background: #c92a2a; color: #fff; border-color: #c92a2a; }
+        body.company-select .company-tab.active { background: #1864ab; border-color: #1864ab; }
+        .panel { background: #fff; border: 1px solid #ffc9c9; border-radius: 6px; padding: 10px; }
+        body.company-select .panel { border-color: #b8daff; }
         .toolbar { display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
         .inline-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
         input, select { border: 1px solid #ced4da; border-radius: 4px; padding: 4px 6px; font-size: 12px; box-sizing: border-box; }
@@ -36,20 +40,22 @@
         .import-log-summary { margin-top: 3px; font-weight: 700; }
         .import-log-row pre { margin: 5px 0 0; white-space: pre-wrap; font-size: 11px; color: #495057; }
         .kpis { display: grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap: 10px; }
-        .kpi { background: #eef2f7; border: 1px solid #d0d7de; border-radius: 6px; padding: 10px 12px; }
+        .kpi { background: #fff0f0; border: 1px solid #ffc9c9; border-radius: 6px; padding: 10px 12px; }
+        body.company-select .kpi { background: #eaf4ff; border-color: #b8daff; }
         .kpi span { display: block; font-size: 12px; color: #495057; font-weight: bold; }
         .kpi strong { display: block; margin-top: 4px; font-size: 22px; line-height: 1; }
         .table-wrap { flex: 1; overflow: auto; background: #fff; border: 1px solid #c9ced6; }
         table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; min-width: 1080px; }
         th, td { border-right: 1px solid #c9ced6; border-bottom: 2px solid #8f969e; padding: 5px 7px; text-align: left; vertical-align: middle; }
-        th { position: sticky; top: 0; z-index: 2; background: #e9ecef; font-weight: bold; }
+        th { position: sticky; top: 0; z-index: 2; background: #fff0f0; font-weight: bold; }
+        body.company-select th { background: #eaf4ff; }
         .code { font-weight: bold; color: #495057; white-space: nowrap; }
         .name { min-width: 280px; }
         .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
         .pager { display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 13px; }
     </style>
 </head>
-<body>
+<body class="{% if current_company == 'IKUJI' %}company-ikuji{% else %}company-select{% endif %}">
     <div class="header">
         <h1>日次販売履歴Dashboard</h1>
         <div class="nav">

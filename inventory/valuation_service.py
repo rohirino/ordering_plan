@@ -21,7 +21,7 @@ ENCODINGS = ('cp932', 'utf-8-sig', 'utf-8', 'shift_jis')
 SELECT_ASSET_STATE_CODES = {'400', '401', '404'}
 METADATA_COLUMNS = {
     '商品コード', 'コード', '商品名', '状態コード', '状態名',
-    '原価', '固定原価', '標準原価', '単価',
+    '状態別評価原価', '原価', '固定原価', '標準原価', '単価',
 }
 
 
@@ -136,7 +136,7 @@ def import_valuation_snapshot(uploaded_file, inventory_date, current_company='IK
         if update_fields:
             product.save(update_fields=update_fields)
 
-        unit_cost, cost_error = parse_number(get_row_value(row, '原価', '固定原価', '標準原価', '単価'))
+        unit_cost, cost_error = parse_number(get_row_value(row, '状態別評価原価', '原価', '固定原価', '標準原価', '単価'))
         if cost_error:
             unit_cost = 0
 

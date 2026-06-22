@@ -137,12 +137,13 @@ def _build_arrival_map(queryset):
     return arr_map
 
 def _get_planning_base_date(target_company='IKUJI'):
-    latest_inventory_date = Inventory.objects.filter(
-        product__owner_company=target_company,
-        inventory_date__isnull=False,
-    ).aggregate(latest=Max('inventory_date'))['latest']
-    if latest_inventory_date:
-        return latest_inventory_date + timedelta(days=1)
+    latest_sales_date = SalesHistory.objects.filter(
+        company=target_company,
+        sold_date__lte=datetime.date.today(),
+    ).aggregate(latest=Max('sold_date'))['latest']
+    if latest_sales_date:
+        # Start forecasting after the last actual sales day, not after the stocktake date.
+        return latest_sales_date + timedelta(days=1)
     return datetime.date.today()
 
 def _recalculate_abc_ranks(target_company='IKUJI'):
@@ -280,7 +281,7 @@ def planning_dashboard(request):
             active_pids = []
             for pid, item in (sales_map_ikuji.items() if current_company=='IKUJI' else sales_map_select.items()):
                 if item['sum_long'] > 0: active_pids.append(pid)
-            if inventories.filter(Q(current_quantity__gt=0) | Q(product_id__in=active_pids)).exists(): inventories = inventories.filter(Q(current_quantity__gt=0) | Q(product_id__in=active_pids))
+            inventories = inventories.filter(product_id__in=active_pids)
     kpi_shortage_cnt, kpi_order_point_cnt = 0, 0
     paginator = Paginator(inventories, 50)
     page_number = request.GET.get('page', 1)
@@ -1272,7 +1273,7 @@ def download_valuation_template(request):
     sample = [sample_code, 'サンプル商品名称', 'A品', '1000'] + ['0'] * len(warehouses)
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(['商品コード', '商品名', '状態名', '原価'] + warehouses)
+    writer.writerow(['商品コード', '商品名', '状態名', '状態別評価原価'] + warehouses)
     writer.writerow(sample)
     response = HttpResponse(buf.getvalue().encode('cp932', errors='replace'), content_type='text/csv')
     response['Content-Disposition'] = f'attachment; filename="template_valuation_{current_company}.csv"'

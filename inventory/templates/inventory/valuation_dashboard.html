@@ -232,7 +232,7 @@
             </div>
             <div class="scroll lower-scroll">
                 <table>
-                    <thead><tr><th>商品コード</th><th>商品名</th><th>状態コード</th><th>状態名</th><th>発注計画反映</th><th class="num">原価</th><th class="num">数量</th><th class="num">在庫金額</th></tr></thead>
+                    <thead><tr><th>商品コード</th><th>商品名</th><th>状態コード</th><th>状態名</th><th>発注計画反映</th><th class="num">状態別評価原価</th><th class="num">数量</th><th class="num">在庫金額</th></tr></thead>
                     <tbody>{% for row in variant_summary %}<tr><td class="code">{{ row.product_variant__product__code }}</td><td class="name-cell">{{ row.product_variant__product__name }}</td><td>{{ row.product_variant__state_code }}</td><td>{{ row.product_variant__state_name }}</td><td><form action="{% url 'update_product_variant_planning_flag' row.product_variant_id %}" method="POST" class="compact-form">{% csrf_token %}<label><input type="checkbox" name="include_in_planning_inventory" {% if row.product_variant__include_in_planning_inventory %}checked{% endif %}>含める</label><button type="submit" style="padding:2px 6px; font-size:10px;">保存</button></form></td><td class="num">{{ row.unit_cost|default:0|comma }}</td><td class="num">{{ row.quantity|default:0|comma }}</td><td class="num">{{ row.amount|default:0|comma }}</td></tr>{% empty %}<tr><td colspan="8">データがありません。</td></tr>{% endfor %}</tbody>
                 </table>
             </div>

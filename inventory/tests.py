@@ -1,4 +1,5 @@
 import csv
+import datetime
 import io
 import tempfile
 from pathlib import Path
@@ -218,11 +219,29 @@ class ImportProductsCommandTests(TestCase):
         self.assertEqual(Inventory.objects.get(product=untouched).current_quantity, 7)
         self.assertEqual(WarehouseInventory.objects.filter(product=product).count(), 2)
 
-    def test_planning_base_date_uses_day_after_latest_inventory_date(self):
+    def test_planning_base_date_uses_today_when_no_sales_history_exists(self):
         product = Product.objects.create(code='6460010', name='グリップ シート', owner_company='IKUJI')
         Inventory.objects.create(product=product, current_quantity=12, inventory_date='2026-05-31')
 
-        self.assertEqual(_get_planning_base_date('IKUJI').isoformat(), '2026-06-01')
+        self.assertEqual(_get_planning_base_date('IKUJI'), datetime.date.today())
+
+    def test_planning_base_date_uses_day_after_latest_sales_date(self):
+        product = Product.objects.create(code='6460010', name='グリップ シート', owner_company='IKUJI')
+        Inventory.objects.create(product=product, current_quantity=12, inventory_date='2026-05-31')
+        SalesHistory.objects.create(
+            product=product,
+            sold_date='2026-06-10',
+            quantity=3,
+            company='IKUJI',
+        )
+        SalesHistory.objects.create(
+            product=product,
+            sold_date='2099-01-01',
+            quantity=3,
+            company='IKUJI',
+        )
+
+        self.assertEqual(_get_planning_base_date('IKUJI').isoformat(), '2026-06-11')
 
     def test_arrivals_upload_normalizes_code_and_aggregates_rows(self):
         product = Product.objects.create(code='6460010', name='グリップ シート', owner_company='IKUJI')
@@ -518,7 +537,7 @@ class ImportProductsCommandTests(TestCase):
 
     def test_valuation_upload_creates_variant_snapshots_and_syncs_to_planning(self):
         rows = [
-            ['商品コード', '商品名', '状態名', '原価', 'ニチイク在庫', '岸和田在庫'],
+            ['商品コード', '商品名', '状態名', '状態別評価原価', 'ニチイク在庫', '岸和田在庫'],
             ['6460010001', 'グリップ シート', '良品', '1000', '10', '2'],
             ['6460010002', 'グリップ シート', '箱傷み', '800', '3', '1'],
         ]
@@ -696,7 +715,7 @@ class ImportProductsCommandTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         rows = list(csv.reader(io.StringIO(response.content.decode('cp932'))))
-        self.assertEqual(rows[0][:4], ['商品コード', '商品名', '状態名', '原価'])
+        self.assertEqual(rows[0][:4], ['商品コード', '商品名', '状態名', '状態別評価原価'])
         self.assertEqual(len(rows[1][0]), 10)
         self.assertEqual(rows[1][2], 'A品')
 

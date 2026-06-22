@@ -93,6 +93,15 @@
         .header-nav-link.dashboard { background-color: #495057; }
         .header-nav-link.help { background-color: #6c757d; }
         .header-nav-link.admin { background-color: #2b8a3e; }
+        .import-log-panel { margin: 4px 0; padding: 6px 10px; border: 1px solid #ced4da; border-radius: 5px; background: #fff; font-size: 12px; }
+        .import-log-panel > summary { cursor: pointer; font-weight: 800; color: #495057; }
+        .import-log-list { display: grid; gap: 6px; margin-top: 6px; max-height: 180px; overflow: auto; }
+        .import-log-row { border-left: 4px solid #2b8a3e; background: #f8f9fa; padding: 6px 8px; }
+        .import-log-row.warning { border-left-color: #f08c00; }
+        .import-log-row.error { border-left-color: #c92a2a; }
+        .import-log-head { display: flex; gap: 8px; flex-wrap: wrap; color: #495057; font-size: 11px; }
+        .import-log-summary { margin-top: 3px; font-weight: 700; }
+        .import-log-row pre { margin: 5px 0 0; white-space: pre-wrap; font-size: 11px; color: #495057; }
     </style>
 </head>
 <body>
@@ -145,6 +154,7 @@
                 {% endfor %}
             </div>
         {% endif %}
+        {% include 'inventory/partials/import_log_panel.html' %}
 
         <form method="GET" style="margin-bottom: 4px; background-color: #f1f3f5; padding: 6px 12px; border-radius: 6px; border: 1px solid #dee2e6;">
             <input type="hidden" name="current_company" value="{{ current_company }}">

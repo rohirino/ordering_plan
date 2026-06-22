@@ -1,6 +1,23 @@
-version: '3.8'
-
 services:
+  db:
+    image: postgres:16
+    container_name: ordering_plan_postgres
+    environment:
+      POSTGRES_DB: ordering_plan
+      POSTGRES_USER: ordering_plan
+      POSTGRES_PASSWORD: ordering_plan_local
+      TZ: Asia/Tokyo
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ordering_plan -d ordering_plan"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   web:
     build: .
     container_name: ordering_plan_container
@@ -10,3 +27,6 @@ services:
     ports:
       - "8000:8000"
     restart: always
+
+volumes:
+  postgres_data:

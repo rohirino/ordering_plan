@@ -7,7 +7,7 @@ from django.views.decorators.http import require_POST
 from django.contrib import messages
 from django.http import HttpResponse
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, Order, ShipmentSchedule, ArrivalSchedule, ProductVariant, InventoryState
+from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, Order, ShipmentSchedule, ArrivalSchedule, ProductVariant, InventoryState, ImportLog
 from .product_importer import import_uploaded_product_file
 from .sales_importer import import_uploaded_sales_file
 from .valuation_service import (
@@ -101,6 +101,33 @@ def _normalize_arrival_status(value):
     if raw_status in ['未定', '予定', '希望納期']:
         return '希望', False
     return '確定', bool(raw_status)
+
+def _uploaded_filename(request):
+    uploaded = request.FILES.get('csv_file')
+    return uploaded.name if uploaded else ''
+
+def _log_import(dashboard, import_type, status, summary, request=None, company='', details='', error_count=0, warning_count=0, filename=''):
+    ImportLog.objects.create(
+        dashboard=dashboard,
+        import_type=import_type,
+        status=status,
+        company=company,
+        filename=filename or (_uploaded_filename(request) if request else ''),
+        summary=summary[:255],
+        details=details,
+        error_count=error_count,
+        warning_count=warning_count,
+    )
+
+def _recent_import_logs(dashboard, limit=8):
+    return ImportLog.objects.filter(dashboard=dashboard).order_by('-created_at')[:limit]
+
+def _status_from_counts(error_count=0, warning_count=0):
+    if error_count:
+        return 'warning'
+    if warning_count:
+        return 'warning'
+    return 'success'
 
 def _build_arrival_map(queryset):
     arr_map = {}
@@ -348,7 +375,7 @@ def planning_dashboard(request):
             item.status_alert = f"🚨 欠品リスク{suffix}" if has_shortage_risk else f"⚠️ 発注点割れ{suffix}" if has_order_point_risk else f"正常{suffix}"
             item.needs_order = has_shortage_risk or has_order_point_risk
         visible_inventories.append(item)
-    return render(request, 'inventory/dashboard.html', {'inventories': visible_inventories, 'page_obj': page_obj, 'date_list': date_list, 'active_months': active_months, 'search_query': search_query, 'inventory_date_choices': inventory_date_choices, 'active_orders': active_orders, 'abc_filter': abc_filter, 'supplier_code': supplier_code, 'show_discontinued': show_discontinued, 'current_company': current_company, 'active_filter': active_filter, 'all_warehouses': all_warehouses, 'ikuji_warehouses': ikuji_warehouses, 'shared_wh_ids': shared_wh_ids, 'kpi_shortage_cnt': kpi_shortage_cnt, 'kpi_order_point_cnt': kpi_order_point_cnt})
+    return render(request, 'inventory/dashboard.html', {'inventories': visible_inventories, 'page_obj': page_obj, 'date_list': date_list, 'active_months': active_months, 'search_query': search_query, 'inventory_date_choices': inventory_date_choices, 'active_orders': active_orders, 'abc_filter': abc_filter, 'supplier_code': supplier_code, 'show_discontinued': show_discontinued, 'current_company': current_company, 'active_filter': active_filter, 'all_warehouses': all_warehouses, 'ikuji_warehouses': ikuji_warehouses, 'shared_wh_ids': shared_wh_ids, 'kpi_shortage_cnt': kpi_shortage_cnt, 'kpi_order_point_cnt': kpi_order_point_cnt, 'import_logs': _recent_import_logs('planning')})
 
 def product_master_dashboard(request):
     current_company = request.GET.get('current_company', 'IKUJI')
@@ -417,6 +444,7 @@ def product_master_dashboard(request):
         'lot_rule_choices': Product.LOT_RULE_CHOICES,
         'trend_days_choices': Product.TREND_DAYS_CHOICES,
         'company_choices': Product.COMPANY_CHOICES,
+        'import_logs': _recent_import_logs('product_master'),
     })
 
 def arrivals_dashboard(request):
@@ -441,6 +469,7 @@ def arrivals_dashboard(request):
         'arrivals': page_obj,
         'page_obj': page_obj,
         'status_choices': ArrivalSchedule.STATUS_CHOICES,
+        'import_logs': _recent_import_logs('arrivals'),
     })
 
 def sales_history_dashboard(request):
@@ -502,6 +531,7 @@ def sales_history_dashboard(request):
         'sales': page_obj,
         'page_obj': page_obj,
         'totals': totals,
+        'import_logs': _recent_import_logs('sales_history'),
     })
 
 def _filter_valuation_variant_rows(variant_rows, params):
@@ -553,6 +583,7 @@ def valuation_dashboard(request):
         'current_company': current_company,
         'selected_date': selected_date,
         'available_dates': available_inventory_dates(current_company),
+        'import_logs': _recent_import_logs('valuation'),
     })
     ctx.update(variant_filter_context)
     return render(request, 'inventory/valuation_dashboard.html', ctx)
@@ -872,30 +903,49 @@ def import_inventory_csv(request):
             except: selected_date = datetime.date.today()
             row_count, unknown_count, quantity_error_count = 0, 0, 0
             seen_codes = set()
+            error_samples = []
             for row in reader:
                 code = _normalize_inventory_product_code(row.get('商品コード', ''))
                 if not code: continue
                 if code not in products:
                     unknown_count += 1
+                    if len(error_samples) < 20:
+                        error_samples.append(f"商品未登録: {code}")
                     continue
                 seen_codes.add(code)
                 p_obj, tot = products[code], 0
                 WarehouseInventory.objects.filter(product=p_obj, warehouse__owner_company=current_company).delete()
                 for w_name, w_obj in wh_map.items():
                     qty, had_error = _parse_inventory_quantity(row.get(w_name, '0'))
-                    if had_error: quantity_error_count += 1
+                    if had_error:
+                        quantity_error_count += 1
+                        if len(error_samples) < 20:
+                            error_samples.append(f"数量エラー: 商品{code} / {w_name} / 値={row.get(w_name, '')}")
                     WarehouseInventory.objects.create(product=p_obj, warehouse=w_obj, quantity=qty)
                     tot += qty
                 Inventory.objects.update_or_create(product=p_obj, defaults={'current_quantity': tot, 'inventory_date': selected_date})
                 row_count += 1
             _recalculate_abc_ranks(current_company)
             unchanged_count = max(len(products) - len(seen_codes), 0)
+            issue_count = unknown_count + quantity_error_count
+            _log_import(
+                'planning',
+                '在庫CSV',
+                _status_from_counts(issue_count),
+                f"更新: {row_count}件 / 未更新: {unchanged_count}件 / 商品未登録: {unknown_count}件 / 数量エラー: {quantity_error_count}件",
+                request=request,
+                company=current_company,
+                details="\n".join(error_samples),
+                error_count=issue_count,
+            )
             messages.success(
                 request,
                 f"実在庫を商品単位で洗替し再評価しました！ "
                 f"(更新: {row_count}件 / 未更新: {unchanged_count}件 / 商品未登録: {unknown_count}件 / 数量エラー: {quantity_error_count}件)"
             )
-        except Exception as e: messages.error(request, f"エラー: {e}")
+        except Exception as e:
+            _log_import('planning', '在庫CSV', 'error', f"取込失敗: {e}", request=request, company=current_company, error_count=1)
+            messages.error(request, f"エラー: {e}")
     return redirect('/?current_company=' + current_company)
 
 def download_csv_template(request, template_type):
@@ -932,13 +982,25 @@ def import_products_csv(request):
         try:
             stats = import_uploaded_product_file(request.FILES['csv_file'], current_company=current_company)
             _recalculate_abc_ranks(current_company)
+            issue_count = stats['duplicate_variants'] + stats['skipped']
+            _log_import(
+                'product_master',
+                '商品マスタCSV',
+                _status_from_counts(issue_count),
+                f"取込対象: {stats['imported']}件 / 状態違い重複スキップ: {stats['duplicate_variants']}件 / その他スキップ: {stats['skipped']}件",
+                request=request,
+                company=current_company,
+                error_count=issue_count,
+            )
             messages.success(
                 request,
                 f"共通商品・A版発注設定の登録完了！ 取込対象: {stats['imported']}件 / "
                 f"状態違い重複スキップ: {stats['duplicate_variants']}件 / "
                 f"その他スキップ: {stats['skipped']}件"
             )
-        except Exception as e: messages.error(request, f"エラー: {e}")
+        except Exception as e:
+            _log_import('product_master', '商品マスタCSV', 'error', f"取込失敗: {e}", request=request, company=current_company, error_count=1)
+            messages.error(request, f"エラー: {e}")
     return redirect(request.META.get('HTTP_REFERER', '/product-master/?current_company=' + current_company))
 
 def import_sales_csv(request):
@@ -947,13 +1009,25 @@ def import_sales_csv(request):
         try:
             stats = import_uploaded_sales_file(request.FILES['csv_file'], current_company=current_company)
             _recalculate_abc_ranks(current_company)
+            issue_count = stats['missing_products'] + stats['skipped']
+            _log_import(
+                'sales_history',
+                '販売履歴CSV',
+                _status_from_counts(issue_count),
+                f"集計行: {stats['aggregated']}件 / 新規: {stats['created']}件 / 更新: {stats['updated']}件 / 商品未登録スキップ: {stats['missing_products']}件 / その他スキップ: {stats['skipped']}件",
+                request=request,
+                company=current_company,
+                error_count=issue_count,
+            )
             messages.success(
                 request,
                 f"販売履歴の集計更新完了（集計行: {stats['aggregated']}件 / "
                 f"新規: {stats['created']}件 / 更新: {stats['updated']}件 / "
                 f"商品未登録スキップ: {stats['missing_products']}件）"
             )
-        except Exception as e: messages.error(request, f"エラー: {e}")
+        except Exception as e:
+            _log_import('sales_history', '販売履歴CSV', 'error', f"取込失敗: {e}", request=request, company=current_company, error_count=1)
+            messages.error(request, f"エラー: {e}")
     return redirect('/?current_company=' + current_company)
 
 def import_arrivals_csv(request):
@@ -965,11 +1039,14 @@ def import_arrivals_csv(request):
             aggregated = {}
             company_counts = {company_code: 0 for company_code, _ in Product.COMPANY_CHOICES}
             unknown_count, error_count, status_fixed_count = 0, 0, 0
+            error_samples = []
             for row in reader:
                 code = _normalize_product_code(row.get('商品コード', ''))
                 if not code: continue
                 if code not in p_dict:
                     unknown_count += 1
+                    if len(error_samples) < 20:
+                        error_samples.append(f"商品未登録: {code} / {row.get('商品名', '')}")
                     continue
                 arrival_date_value = _pick_first_value(row, ['入荷予定日', '予定日', '入荷日', '入港日'])
                 quantity_value = _pick_first_value(row, ['入荷予定数量', '入荷数量', '数量'])
@@ -977,6 +1054,8 @@ def import_arrivals_csv(request):
                 qty, quantity_error = _parse_csv_quantity(quantity_value)
                 if not ad or quantity_error:
                     error_count += 1
+                    if len(error_samples) < 20:
+                        error_samples.append(f"日付数量エラー: 商品{code} / 日付={arrival_date_value} / 数量={quantity_value}")
                     continue
                 status_value = _pick_first_value(row, ['確度ステータス', '確度', '決定'], default='確定')
                 status, status_was_fixed = _normalize_arrival_status(status_value)
@@ -986,6 +1065,16 @@ def import_arrivals_csv(request):
                 aggregated[key] = aggregated.get(key, 0) + qty
 
             if not aggregated:
+                _log_import(
+                    'arrivals',
+                    '入荷予定CSV',
+                    'error',
+                    f"有効な入荷予定なし / 商品未登録: {unknown_count}件 / 日付数量エラー: {error_count}件",
+                    request=request,
+                    company='ALL',
+                    details="\n".join(error_samples),
+                    error_count=unknown_count + error_count,
+                )
                 messages.error(
                     request,
                     f"有効な入荷予定がありません。既存データは変更していません。"
@@ -1006,6 +1095,18 @@ def import_arrivals_csv(request):
                 f"{label}: {company_counts.get(company_code, 0)}件"
                 for company_code, label in Product.COMPANY_CHOICES
             )
+            issue_count = unknown_count + error_count
+            _log_import(
+                'arrivals',
+                '入荷予定CSV',
+                _status_from_counts(issue_count),
+                f"登録: {len(create_list)}件 / 商品未登録: {unknown_count}件 / 日付数量エラー: {error_count}件 / ステータス補正: {status_fixed_count}件 / {company_summary}",
+                request=request,
+                company='ALL',
+                details="\n".join(error_samples),
+                error_count=issue_count,
+                warning_count=status_fixed_count,
+            )
             messages.success(
                 request,
                 f"入荷予定を両社へ自動振分して洗替更新しました！"
@@ -1013,7 +1114,9 @@ def import_arrivals_csv(request):
                 f"日付数量エラー: {error_count}件 / ステータス補正: {status_fixed_count}件 / "
                 f"{company_summary}）"
             )
-        except Exception as e: messages.error(request, f"エラー: {e}")
+        except Exception as e:
+            _log_import('arrivals', '入荷予定CSV', 'error', f"取込失敗: {e}", request=request, company='ALL', error_count=1)
+            messages.error(request, f"エラー: {e}")
     return redirect(request.META.get('HTTP_REFERER', '/arrivals/?current_company=' + current_company))
 
 def product_list(request): return render(request, 'inventory/product_list.html', {'products': Product.objects.all().order_by('code')})
@@ -1076,6 +1179,16 @@ def import_valuation_csv(request):
         try:
             inventory_date = parse_inventory_date(request.POST.get('inventory_date'), current_company)
             stats = import_valuation_snapshot(request.FILES['csv_file'], inventory_date, current_company)
+            issue_count = stats['skipped'] + stats['quantity_errors']
+            _log_import(
+                'valuation',
+                '棚卸資産評価CSV',
+                _status_from_counts(issue_count),
+                f"明細: {stats['snapshots']}件 / 状態SKU: {stats['variants']}件 / 倉庫: {stats['warehouses']}件 / ペットセレクト資産振替: {stats['select_asset_rows']}件 / スキップ: {stats['skipped']}件 / 数量エラー: {stats['quantity_errors']}件",
+                request=request,
+                company=current_company,
+                error_count=issue_count,
+            )
             messages.success(
                 request,
                 f"棚卸資産評価を登録しました。明細: {stats['snapshots']}件 / 状態SKU: {stats['variants']}件 / "
@@ -1084,6 +1197,7 @@ def import_valuation_csv(request):
             )
             return redirect(f'/valuation/?current_company={current_company}&inventory_date={inventory_date:%Y-%m-%d}')
         except Exception as e:
+            _log_import('valuation', '棚卸資産評価CSV', 'error', f"取込失敗: {e}", request=request, company=current_company, error_count=1)
             messages.error(request, f"棚卸資産評価登録エラー: {e}")
     return redirect('/valuation/?current_company=' + current_company)
 
@@ -1092,12 +1206,22 @@ def import_inventory_state_csv(request):
     if request.method == 'POST' and request.FILES.get('csv_file'):
         try:
             stats = import_inventory_state_master(request.FILES['csv_file'])
+            _log_import(
+                'valuation',
+                '状態マスタCSV',
+                _status_from_counts(stats['skipped']),
+                f"登録/更新: {stats['imported']}件 / スキップ: {stats['skipped']}件 / 状態別SKU更新: {stats.get('variants_updated', 0)}件",
+                request=request,
+                company='ALL',
+                error_count=stats['skipped'],
+            )
             messages.success(
                 request,
                 f"在庫状態マスタを登録しました。登録/更新: {stats['imported']}件 / "
                 f"スキップ: {stats['skipped']}件 / 状態別SKU更新: {stats.get('variants_updated', 0)}件"
             )
         except Exception as e:
+            _log_import('valuation', '状態マスタCSV', 'error', f"取込失敗: {e}", request=request, company='ALL', error_count=1)
             messages.error(request, f"在庫状態マスタ登録エラー: {e}")
     return redirect(request.META.get('HTTP_REFERER', '/valuation/?current_company=' + current_company))
 

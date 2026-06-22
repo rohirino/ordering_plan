@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, ShipmentSchedule, ArrivalSchedule, Order
+from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, ShipmentSchedule, ArrivalSchedule, Order, ImportLog
 
 class WarehouseInventoryInline(admin.TabularInline):
     model = WarehouseInventory
@@ -59,3 +59,10 @@ class OrderAdmin(admin.ModelAdmin):
     get_code.short_description = '商品コード'
     def get_name(self, obj): return obj.product.name
     get_name.short_description = '商品名'
+
+@admin.register(ImportLog)
+class ImportLogAdmin(admin.ModelAdmin):
+    list_display = ('created_at', 'dashboard', 'import_type', 'status', 'company', 'filename', 'error_count', 'warning_count', 'summary')
+    list_filter = ('dashboard', 'import_type', 'status', 'company', 'created_at')
+    search_fields = ('filename', 'summary', 'details')
+    readonly_fields = ('created_at',)

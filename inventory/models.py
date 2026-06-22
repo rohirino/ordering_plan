@@ -201,6 +201,38 @@ class ArrivalSchedule(models.Model):
     status = models.CharField(verbose_name="確度ステータス", max_length=10, choices=STATUS_CHOICES)
 
 
+class ImportLog(models.Model):
+    """CSV等の取込結果ログ"""
+    STATUS_CHOICES = (
+        ('success', '成功'),
+        ('warning', '警告あり'),
+        ('error', '失敗'),
+    )
+    DASHBOARD_CHOICES = (
+        ('planning', '在庫・発注計画'),
+        ('product_master', '商品マスタ登録'),
+        ('sales_history', '日次販売履歴'),
+        ('arrivals', '入荷予定・発注残'),
+        ('valuation', '棚卸資産評価'),
+    )
+
+    dashboard = models.CharField(verbose_name="対象Dashboard", max_length=30, choices=DASHBOARD_CHOICES)
+    import_type = models.CharField(verbose_name="取込種別", max_length=50)
+    status = models.CharField(verbose_name="結果", max_length=10, choices=STATUS_CHOICES)
+    company = models.CharField(verbose_name="対象会社", max_length=20, blank=True, default='')
+    filename = models.CharField(verbose_name="ファイル名", max_length=255, blank=True, default='')
+    summary = models.CharField(verbose_name="概要", max_length=255)
+    details = models.TextField(verbose_name="詳細", blank=True, default='')
+    error_count = models.IntegerField(verbose_name="エラー件数", default=0)
+    warning_count = models.IntegerField(verbose_name="警告件数", default=0)
+    created_at = models.DateTimeField(verbose_name="記録日時", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "取込ログ"
+        verbose_name_plural = "取込ログ"
+        ordering = ['-created_at']
+
+
 class Order(models.Model):
     """発注計画データ"""
     STATUS_CHOICES = (('計画中', '計画中'), ('発注済', '発注済'), ('入庫済', '入庫済'))

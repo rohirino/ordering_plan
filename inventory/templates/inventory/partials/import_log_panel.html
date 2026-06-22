@@ -1,0 +1,22 @@
+{% if import_logs %}
+<details class="import-log-panel">
+    <summary>取込ログを確認する</summary>
+    <div class="import-log-list">
+        {% for log in import_logs %}
+        <div class="import-log-row {{ log.status }}">
+            <div class="import-log-head">
+                <strong>{{ log.get_status_display }}</strong>
+                <span>{{ log.created_at|date:"Y/m/d H:i" }}</span>
+                <span>{{ log.import_type }}</span>
+                {% if log.company %}<span>{{ log.company }}</span>{% endif %}
+                {% if log.filename %}<span>{{ log.filename }}</span>{% endif %}
+            </div>
+            <div class="import-log-summary">{{ log.summary }}</div>
+            {% if log.details %}
+            <pre>{{ log.details }}</pre>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</details>
+{% endif %}

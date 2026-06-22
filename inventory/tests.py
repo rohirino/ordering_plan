@@ -12,6 +12,7 @@ from inventory.models import (
     ArrivalSchedule,
     Inventory,
     InventoryValuationSnapshot,
+    ImportLog,
     Product,
     ProductVariant,
     InventoryState,
@@ -318,6 +319,11 @@ class ImportProductsCommandTests(TestCase):
             ArrivalSchedule.objects.get(product=select_product, arrival_date='2026-06-16').quantity,
             20,
         )
+        log = ImportLog.objects.latest('created_at')
+        self.assertEqual(log.dashboard, 'arrivals')
+        self.assertEqual(log.status, 'success')
+        self.assertIn('日本育児: 1件', log.summary)
+        self.assertIn('ペットセレクト: 1件', log.summary)
 
     def test_invalid_arrivals_upload_does_not_delete_existing_data(self):
         product = Product.objects.create(code='6460010', name='グリップ シート', owner_company='IKUJI')
@@ -341,6 +347,10 @@ class ImportProductsCommandTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(ArrivalSchedule.objects.count(), 1)
         self.assertEqual(ArrivalSchedule.objects.get().quantity, 10)
+        log = ImportLog.objects.latest('created_at')
+        self.assertEqual(log.dashboard, 'arrivals')
+        self.assertEqual(log.status, 'error')
+        self.assertIn('有効な入荷予定なし', log.summary)
 
     def test_create_arrival_schedule_normalizes_code_and_overwrites_same_key(self):
         product = Product.objects.create(code='6460010', name='グリップ シート', owner_company='IKUJI')

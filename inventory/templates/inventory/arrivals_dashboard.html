@@ -25,6 +25,15 @@
         input[type="number"] { text-align: right; }
         .messages { display: flex; flex-direction: column; gap: 4px; }
         .message { padding: 6px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; background: #fff3cd; color: #856404; border: 1px solid #ffe08a; }
+        .import-log-panel { padding: 6px 10px; border: 1px solid #ced4da; border-radius: 5px; background: #fff; font-size: 12px; }
+        .import-log-panel > summary { cursor: pointer; font-weight: 800; color: #495057; }
+        .import-log-list { display: grid; gap: 6px; margin-top: 6px; max-height: 180px; overflow: auto; }
+        .import-log-row { border-left: 4px solid #2b8a3e; background: #f8f9fa; padding: 6px 8px; }
+        .import-log-row.warning { border-left-color: #f08c00; }
+        .import-log-row.error { border-left-color: #c92a2a; }
+        .import-log-head { display: flex; gap: 8px; flex-wrap: wrap; color: #495057; font-size: 11px; }
+        .import-log-summary { margin-top: 3px; font-weight: 700; }
+        .import-log-row pre { margin: 5px 0 0; white-space: pre-wrap; font-size: 11px; color: #495057; }
         .table-wrap { flex: 1; overflow: auto; background: #fff; border: 1px solid #c9ced6; }
         table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; min-width: 920px; }
         th, td { border-right: 1px solid #c9ced6; border-bottom: 2px solid #8f969e; padding: 5px 7px; text-align: left; vertical-align: middle; }
@@ -68,6 +77,7 @@
         {% for message in messages %}<div class="message">{{ message.message }}</div>{% endfor %}
     </div>
     {% endif %}
+    {% include 'inventory/partials/import_log_panel.html' %}
 
     <div class="panel toolbar">
         <form method="GET" class="inline-form">

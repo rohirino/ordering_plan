@@ -143,6 +143,22 @@ class ImportProductsCommandTests(TestCase):
         return_sale = SalesHistory.objects.get(product__code='6460010', sales_category='返品')
         self.assertEqual(return_sale.quantity, -1)
 
+    def test_sales_upload_normalizes_eight_digit_source_code_with_missing_leading_zeros(self):
+        Product.objects.create(code='0040007', name='先頭ゼロ商品', owner_company='IKUJI')
+        rows = [
+            ['伝票日付', '得意先コード', '商品コード', '区分', '数量', '税抜金額', '粗利金額'],
+            ['2026/06/01', 'C001', '40007001', '売上', '2', '200', '80'],
+        ]
+        uploaded = SimpleUploadedFile('sales_leading_zero.csv', self.csv_bytes(rows), content_type='text/csv')
+
+        response = self.client.post(
+            reverse('import_sales_csv'),
+            {'current_company': 'IKUJI', 'csv_file': uploaded},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(SalesHistory.objects.get().product.code, '0040007')
+
     def test_sales_import_skip_csv_includes_missing_products_and_other_reasons(self):
         Product.objects.create(code='6460010', name='登録済商品', owner_company='IKUJI')
         rows = [
@@ -164,6 +180,10 @@ class ImportProductsCommandTests(TestCase):
         self.assertTrue(SalesImportSkip.objects.filter(import_log=import_log, reason='商品マスタ未登録').exists())
         self.assertTrue(SalesImportSkip.objects.filter(import_log=import_log, reason='伝票日付形式不正').exists())
         self.assertTrue(SalesImportSkip.objects.filter(import_log=import_log, reason='得意先コード未入力').exists())
+
+        missing_product_skip = SalesImportSkip.objects.get(import_log=import_log, reason='商品マスタ未登録')
+        self.assertEqual(missing_product_skip.source_product_code, '9999999001')
+        self.assertEqual(missing_product_skip.normalized_product_code, '9999999')
 
         download_response = self.client.get(
             reverse('download_sales_import_skips', args=[import_log.id]),

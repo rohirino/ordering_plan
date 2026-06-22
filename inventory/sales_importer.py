@@ -66,12 +66,17 @@ def parse_date(value):
 
 
 def normalize_product_code(raw_code):
-    digit_code = ''.join(ch for ch in str(raw_code or '') if ch.isdigit())
+    raw_text = str(raw_code or '').strip()
+    if raw_text.endswith('.0') and raw_text[:-2].isdigit():
+        raw_text = raw_text[:-2]
+    digit_code = ''.join(ch for ch in raw_text if ch.isdigit())
     if len(digit_code) >= 10:
         return digit_code[:7]
+    if len(digit_code) in (8, 9):
+        return digit_code.zfill(10)[:7]
     if digit_code and len(digit_code) < 7:
         return digit_code.zfill(7)
-    return digit_code or str(raw_code or '').strip()
+    return digit_code or raw_text
 
 
 def get_row_value(row, *keys):
@@ -147,6 +152,7 @@ def aggregate_sales_rows(rows, current_company='IKUJI'):
         'tax_excluded_amount': 0,
         'gross_profit_amount': 0,
         'source_rows': [],
+        'source_product_codes': [],
         'product_name': '',
     })
     skipped_rows = []
@@ -186,6 +192,7 @@ def aggregate_sales_rows(rows, current_company='IKUJI'):
         aggregated[key]['tax_excluded_amount'] += parse_number(row.get('税抜金額'))
         aggregated[key]['gross_profit_amount'] += parse_number(row.get('粗利金額'))
         aggregated[key]['source_rows'].append(str(row.get('元データ行') or ''))
+        aggregated[key]['source_product_codes'].append(str(row.get('商品コード') or '').strip())
         if not aggregated[key]['product_name']:
             aggregated[key]['product_name'] = str(row.get('商品名') or '').strip()
 
@@ -218,7 +225,7 @@ def import_sales_rows(rows, current_company='IKUJI', dry_run=False):
                 'reason': '商品マスタ未登録',
                 'sold_date_text': sold_date.strftime('%Y/%m/%d'),
                 'customer_code': customer_code,
-                'source_product_code': product_code,
+                'source_product_code': ', '.join(dict.fromkeys(filter(None, totals['source_product_codes']))),
                 'normalized_product_code': product_code,
                 'product_name': totals['product_name'],
                 'sales_category': sales_category,

@@ -7,7 +7,7 @@ from django.views.decorators.http import require_POST
 from django.contrib import messages
 from django.http import HttpResponse
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, Order, ShipmentSchedule, ArrivalSchedule, ProductVariant, InventoryState, ImportLog
+from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, Order, ShipmentSchedule, ArrivalSchedule, ProductVariant, InventoryState, ImportLog, SalesImportSkip
 from .product_importer import import_uploaded_product_file
 from .sales_importer import import_uploaded_sales_file
 from .valuation_service import (
@@ -107,7 +107,7 @@ def _uploaded_filename(request):
     return uploaded.name if uploaded else ''
 
 def _log_import(dashboard, import_type, status, summary, request=None, company='', details='', error_count=0, warning_count=0, filename=''):
-    ImportLog.objects.create(
+    return ImportLog.objects.create(
         dashboard=dashboard,
         import_type=import_type,
         status=status,
@@ -482,6 +482,24 @@ def sales_history_dashboard(request):
     sales_category = request.GET.get('sales_category', '').strip()
     date_from = request.GET.get('date_from', '').strip()
     date_to = request.GET.get('date_to', '').strip()
+    summary_period = request.GET.get('summary_period', 'all')
+    if summary_period == 'all' and (date_from or date_to):
+        summary_period = 'custom'
+    if summary_period in {'last_7', 'last_30', 'this_month', 'previous_month'}:
+        today = datetime.date.today()
+        if summary_period == 'last_7':
+            period_start, period_end = today - timedelta(days=6), today
+        elif summary_period == 'last_30':
+            period_start, period_end = today - timedelta(days=29), today
+        elif summary_period == 'this_month':
+            period_start, period_end = today.replace(day=1), today
+        else:
+            current_month_start = today.replace(day=1)
+            period_end = current_month_start - timedelta(days=1)
+            period_start = period_end.replace(day=1)
+        date_from, date_to = period_start.isoformat(), period_end.isoformat()
+    elif summary_period not in {'all', 'custom'}:
+        summary_period = 'all'
     sales = SalesHistory.objects.select_related('product').filter(company=current_company).order_by(
         '-sold_date', 'customer', 'product__code', 'sales_category'
     )
@@ -521,6 +539,9 @@ def sales_history_dashboard(request):
         page_obj = paginator.page(1)
     except EmptyPage:
         page_obj = paginator.page(paginator.num_pages)
+    latest_skip_log = ImportLog.objects.filter(
+        dashboard='sales_history', company=current_company, sales_skips__isnull=False,
+    ).distinct().order_by('-created_at').first()
     return render(request, 'inventory/sales_history_dashboard.html', {
         'current_company': current_company,
         'search_query': search_query,
@@ -528,11 +549,13 @@ def sales_history_dashboard(request):
         'sales_category': sales_category,
         'date_from': date_from,
         'date_to': date_to,
+        'summary_period': summary_period,
         'categories': categories,
         'sales': page_obj,
         'page_obj': page_obj,
         'totals': totals,
         'import_logs': _recent_import_logs('sales_history'),
+        'latest_skip_log': latest_skip_log,
     })
 
 def _filter_valuation_variant_rows(variant_rows, params):
@@ -1011,7 +1034,7 @@ def import_sales_csv(request):
             stats = import_uploaded_sales_file(request.FILES['csv_file'], current_company=current_company)
             _recalculate_abc_ranks(current_company)
             issue_count = stats['missing_products'] + stats['skipped']
-            _log_import(
+            import_log = _log_import(
                 'sales_history',
                 '販売履歴CSV',
                 _status_from_counts(issue_count),
@@ -1020,6 +1043,10 @@ def import_sales_csv(request):
                 company=current_company,
                 error_count=issue_count,
             )
+            SalesImportSkip.objects.bulk_create([
+                SalesImportSkip(import_log=import_log, **skip_row)
+                for skip_row in stats['skip_rows']
+            ])
             messages.success(
                 request,
                 f"販売履歴の集計更新完了（集計行: {stats['aggregated']}件 / "
@@ -1030,6 +1057,33 @@ def import_sales_csv(request):
             _log_import('sales_history', '販売履歴CSV', 'error', f"取込失敗: {e}", request=request, company=current_company, error_count=1)
             messages.error(request, f"エラー: {e}")
     return redirect('/?current_company=' + current_company)
+
+
+def download_sales_import_skips(request, import_log_id):
+    current_company = request.GET.get('current_company', 'IKUJI')
+    import_log = get_object_or_404(
+        ImportLog,
+        id=import_log_id,
+        dashboard='sales_history',
+        company=current_company,
+    )
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="sales_import_skips_{current_company}_{import_log.created_at:%Y%m%d_%H%M%S}.csv"'
+    writer = csv.writer(response)
+    writer.writerow([
+        '元データ行', 'スキップ理由', '伝票日付', '得意先コード', '元商品コード',
+        '正規化商品コード', '商品名', '区分', '数量', '税抜金額', '粗利金額',
+    ])
+    for row in import_log.sales_skips.all():
+        writer.writerow([
+            row.source_rows, row.reason, row.sold_date_text, row.customer_code,
+            row.source_product_code, row.normalized_product_code, row.product_name,
+            row.sales_category, row.quantity_text, row.tax_excluded_amount_text,
+            row.gross_profit_amount_text,
+        ])
+    response.charset = 'cp932'
+    response.content = response.content.decode('utf-8').encode('cp932', errors='replace')
+    return response
 
 def import_arrivals_csv(request):
     current_company = request.POST.get('current_company', 'IKUJI')

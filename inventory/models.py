@@ -233,6 +233,27 @@ class ImportLog(models.Model):
         ordering = ['-created_at']
 
 
+class SalesImportSkip(models.Model):
+    """販売履歴CSVで登録されなかった明細を、取込ログ単位で保持する。"""
+    import_log = models.ForeignKey(ImportLog, on_delete=models.CASCADE, related_name='sales_skips', verbose_name='取込ログ')
+    source_rows = models.CharField(verbose_name='元データ行', max_length=100, blank=True, default='')
+    reason = models.CharField(verbose_name='スキップ理由', max_length=100)
+    sold_date_text = models.CharField(verbose_name='伝票日付', max_length=50, blank=True, default='')
+    customer_code = models.CharField(verbose_name='得意先コード', max_length=100, blank=True, default='')
+    source_product_code = models.CharField(verbose_name='元商品コード', max_length=100, blank=True, default='')
+    normalized_product_code = models.CharField(verbose_name='正規化商品コード', max_length=50, blank=True, default='')
+    product_name = models.CharField(verbose_name='商品名', max_length=255, blank=True, default='')
+    sales_category = models.CharField(verbose_name='区分', max_length=50, blank=True, default='')
+    quantity_text = models.CharField(verbose_name='数量', max_length=50, blank=True, default='')
+    tax_excluded_amount_text = models.CharField(verbose_name='税抜金額', max_length=50, blank=True, default='')
+    gross_profit_amount_text = models.CharField(verbose_name='粗利金額', max_length=50, blank=True, default='')
+
+    class Meta:
+        verbose_name = '販売履歴取込スキップ明細'
+        verbose_name_plural = '販売履歴取込スキップ明細'
+        ordering = ['id']
+
+
 class Order(models.Model):
     """発注計画データ"""
     STATUS_CHOICES = (('計画中', '計画中'), ('発注済', '発注済'), ('入庫済', '入庫済'))

@@ -34,6 +34,7 @@ urlpatterns = [
     path('import-products/', views.import_products_csv, name='import_products_csv'),
     path('import-inventory/', views.import_inventory_csv, name='import_inventory_csv'),
     path('import-sales/', views.import_sales_csv, name='import_sales_csv'),
+    path('sales-import-skips/<int:import_log_id>/', views.download_sales_import_skips, name='download_sales_import_skips'),
     path('import-arrivals/', views.import_arrivals_csv, name='import_arrivals_csv'),
     path('import-valuation/', views.import_valuation_csv, name='import_valuation_csv'),
     path('import-inventory-states/', views.import_inventory_state_csv, name='import_inventory_state_csv'),

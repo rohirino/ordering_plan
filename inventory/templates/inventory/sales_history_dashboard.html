@@ -95,6 +95,14 @@
             <input type="hidden" name="current_company" value="{{ current_company }}">
             <input type="text" name="search_query" value="{{ search_query }}" placeholder="商品コード・商品名・得意先" style="width: 230px;">
             <input type="text" name="product_prefix" value="{{ product_prefix }}" placeholder="前3桁" maxlength="3" style="width: 58px;">
+            <select name="summary_period" onchange="this.form.submit();">
+                <option value="all" {% if summary_period == 'all' %}selected{% endif %}>全期間</option>
+                <option value="last_7" {% if summary_period == 'last_7' %}selected{% endif %}>直近7日</option>
+                <option value="last_30" {% if summary_period == 'last_30' %}selected{% endif %}>直近30日</option>
+                <option value="this_month" {% if summary_period == 'this_month' %}selected{% endif %}>当月</option>
+                <option value="previous_month" {% if summary_period == 'previous_month' %}selected{% endif %}>前月</option>
+                <option value="custom" {% if summary_period == 'custom' %}selected{% endif %}>指定期間</option>
+            </select>
             <input type="date" name="date_from" value="{{ date_from }}">
             <input type="date" name="date_to" value="{{ date_to }}">
             <select name="sales_category">
@@ -102,13 +110,14 @@
                 {% for category in categories %}<option value="{{ category }}" {% if sales_category == category %}selected{% endif %}>{{ category }}</option>{% endfor %}
             </select>
             <button type="submit" class="primary">検索</button>
-            {% if search_query or product_prefix or date_from or date_to or sales_category %}<a class="btn" href="?current_company={{ current_company }}">クリア</a>{% endif %}
+            {% if search_query or product_prefix or date_from or date_to or sales_category or summary_period != 'all' %}<a class="btn" href="?current_company={{ current_company }}">クリア</a>{% endif %}
         </form>
         <form action="{% url 'import_sales_csv' %}" method="POST" enctype="multipart/form-data" class="inline-form">
             {% csrf_token %}
             <input type="hidden" name="current_company" value="{{ current_company }}">
             <a class="btn" href="{% url 'download_csv_template' 'sales' %}?current_company={{ current_company }}">雛形</a>
             <a class="btn" href="{% url 'export_sales_csv' %}?current_company={{ current_company }}">CSV出力</a>
+            {% if latest_skip_log %}<a class="btn" href="{% url 'download_sales_import_skips' latest_skip_log.id %}?current_company={{ current_company }}">スキップCSV（{{ latest_skip_log.sales_skips.count }}件）</a>{% endif %}
             <input type="file" name="csv_file" accept=".csv" required>
             <button type="submit" class="primary">CSV取込</button>
         </form>
@@ -157,9 +166,9 @@
     </div>
 
     <div class="pager">
-        {% if page_obj.has_previous %}<a class="btn" href="?current_company={{ current_company }}&search_query={{ search_query }}&product_prefix={{ product_prefix }}&date_from={{ date_from }}&date_to={{ date_to }}&sales_category={{ sales_category }}&page={{ page_obj.previous_page_number }}">前へ</a>{% endif %}
+        {% if page_obj.has_previous %}<a class="btn" href="?current_company={{ current_company }}&search_query={{ search_query }}&product_prefix={{ product_prefix }}&summary_period={{ summary_period }}&date_from={{ date_from }}&date_to={{ date_to }}&sales_category={{ sales_category }}&page={{ page_obj.previous_page_number }}">前へ</a>{% endif %}
         <span>{{ page_obj.number }} / {{ page_obj.paginator.num_pages }} ページ（{{ page_obj.paginator.count }} 件）</span>
-        {% if page_obj.has_next %}<a class="btn" href="?current_company={{ current_company }}&search_query={{ search_query }}&product_prefix={{ product_prefix }}&date_from={{ date_from }}&date_to={{ date_to }}&sales_category={{ sales_category }}&page={{ page_obj.next_page_number }}">次へ</a>{% endif %}
+        {% if page_obj.has_next %}<a class="btn" href="?current_company={{ current_company }}&search_query={{ search_query }}&product_prefix={{ product_prefix }}&summary_period={{ summary_period }}&date_from={{ date_from }}&date_to={{ date_to }}&sales_category={{ sales_category }}&page={{ page_obj.next_page_number }}">次へ</a>{% endif %}
     </div>
 </body>
 </html>

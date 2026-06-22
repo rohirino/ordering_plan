@@ -14,6 +14,7 @@ from inventory.models import (
     Inventory,
     InventoryValuationSnapshot,
     ImportLog,
+    SalesImportSkip,
     Product,
     ProductVariant,
     InventoryState,
@@ -142,6 +143,40 @@ class ImportProductsCommandTests(TestCase):
         return_sale = SalesHistory.objects.get(product__code='6460010', sales_category='返品')
         self.assertEqual(return_sale.quantity, -1)
 
+    def test_sales_import_skip_csv_includes_missing_products_and_other_reasons(self):
+        Product.objects.create(code='6460010', name='登録済商品', owner_company='IKUJI')
+        rows = [
+            ['伝票日付', '得意先コード', '商品コード', '区分', '数量', '税抜金額', '粗利金額'],
+            ['2026/06/01', 'C001', '9999999001', '売上', '2', '200', '80'],
+            ['日付不正', 'C002', '6460010001', '売上', '1', '100', '40'],
+            ['2026/06/02', '', '6460010001', '売上', '1', '100', '40'],
+        ]
+        uploaded = SimpleUploadedFile('sales_skips.csv', self.csv_bytes(rows), content_type='text/csv')
+
+        response = self.client.post(
+            reverse('import_sales_csv'),
+            {'current_company': 'IKUJI', 'csv_file': uploaded},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        import_log = ImportLog.objects.get(dashboard='sales_history', company='IKUJI')
+        self.assertEqual(SalesImportSkip.objects.filter(import_log=import_log).count(), 3)
+        self.assertTrue(SalesImportSkip.objects.filter(import_log=import_log, reason='商品マスタ未登録').exists())
+        self.assertTrue(SalesImportSkip.objects.filter(import_log=import_log, reason='伝票日付形式不正').exists())
+        self.assertTrue(SalesImportSkip.objects.filter(import_log=import_log, reason='得意先コード未入力').exists())
+
+        download_response = self.client.get(
+            reverse('download_sales_import_skips', args=[import_log.id]),
+            {'current_company': 'IKUJI'},
+        )
+        downloaded = download_response.content.decode('cp932')
+
+        self.assertEqual(download_response.status_code, 200)
+        self.assertIn('スキップ理由', downloaded)
+        self.assertIn('商品マスタ未登録', downloaded)
+        self.assertIn('伝票日付形式不正', downloaded)
+        self.assertIn('得意先コード未入力', downloaded)
+
     def test_sales_history_dashboard_lists_and_filters_sales(self):
         product = Product.objects.create(code='6460010', name='グリップ シート', owner_company='IKUJI')
         other = Product.objects.create(code='9990001', name='別商品', owner_company='IKUJI')
@@ -177,6 +212,22 @@ class ImportProductsCommandTests(TestCase):
         self.assertIn('6460010', body)
         self.assertNotIn('9990001', body)
         self.assertIn('5,000', body)
+
+    def test_sales_history_dashboard_applies_summary_period_to_totals(self):
+        product = Product.objects.create(code='6460010', name='集計商品', owner_company='IKUJI')
+        today = datetime.date.today()
+        SalesHistory.objects.create(product=product, sold_date=today, quantity=5, customer='C001', company='IKUJI')
+        SalesHistory.objects.create(product=product, sold_date=today - datetime.timedelta(days=10), quantity=9, customer='C001', company='IKUJI')
+
+        response = self.client.get(
+            reverse('sales_history_dashboard'),
+            {'current_company': 'IKUJI', 'summary_period': 'last_7'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['totals']['quantity'], 5)
+        self.assertEqual(response.context['date_from'], (today - datetime.timedelta(days=6)).isoformat())
+        self.assertEqual(response.context['date_to'], today.isoformat())
 
     def test_sales_template_matches_sales_management_detail_shape(self):
         response = self.client.get(reverse('download_csv_template', args=['sales']))

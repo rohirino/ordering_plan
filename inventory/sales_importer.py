@@ -95,20 +95,23 @@ def iter_sales_rows(rows):
     if headers.count('コード') >= 2 and '得意先名' in headers and '商品名' in headers:
         customer_code_idx = headers.index('コード')
         product_code_idx = [idx for idx, header in enumerate(headers) if header == 'コード'][1]
+        product_name_idx = headers.index('商品名')
         date_idx = headers.index('伝票日付')
         category_idx = headers.index('区分')
         quantity_idx = headers.index('数量')
         tax_idx = headers.index('税抜金額')
         gross_idx = headers.index('粗利金額')
 
-        for row in rows[header_index + 1:]:
+        for source_row_number, row in enumerate(rows[header_index + 1:], header_index + 2):
             if not any(cell.strip() for cell in row):
                 continue
             padded = list(row) + [''] * max(0, len(headers) - len(row))
             yield {
+                '元データ行': source_row_number,
                 '伝票日付': padded[date_idx],
                 '得意先コード': padded[customer_code_idx],
                 '商品コード': padded[product_code_idx],
+                '商品名': padded[product_name_idx],
                 '区分': padded[category_idx],
                 '数量': padded[quantity_idx],
                 '税抜金額': padded[tax_idx],
@@ -117,7 +120,7 @@ def iter_sales_rows(rows):
         return
 
     # 従来の加工済みCSV形式
-    for data_row in rows[header_index + 1:]:
+    for source_row_number, data_row in enumerate(rows[header_index + 1:], header_index + 2):
         row = {
             header: value
             for header, value in zip_longest(headers, data_row, fillvalue='')
@@ -126,9 +129,11 @@ def iter_sales_rows(rows):
         if row.get('伝票日付', '').startswith('field_'):
             continue
         yield {
+            '元データ行': source_row_number,
             '伝票日付': get_row_value(row, '伝票日付'),
             '得意先コード': get_row_value(row, '得意先コード', '得意先名'),
             '商品コード': get_row_value(row, '商品コード'),
+            '商品名': get_row_value(row, '商品名'),
             '区分': get_row_value(row, '区分') or '売上',
             '数量': get_row_value(row, '数量', '販売数', '合計 / 数量'),
             '税抜金額': get_row_value(row, '税抜金額', '合計 / 税抜'),
@@ -141,8 +146,10 @@ def aggregate_sales_rows(rows, current_company='IKUJI'):
         'quantity': 0,
         'tax_excluded_amount': 0,
         'gross_profit_amount': 0,
+        'source_rows': [],
+        'product_name': '',
     })
-    skipped = 0
+    skipped_rows = []
 
     for row in iter_sales_rows(rows):
         sold_date = parse_date(row.get('伝票日付'))
@@ -151,19 +158,42 @@ def aggregate_sales_rows(rows, current_company='IKUJI'):
         sales_category = str(row.get('区分') or '売上').strip() or '売上'
 
         if not sold_date or not customer_code or not product_code:
-            skipped += 1
+            reasons = []
+            raw_date = str(row.get('伝票日付') or '').strip()
+            if not sold_date:
+                reasons.append('伝票日付未入力' if not raw_date else '伝票日付形式不正')
+            if not customer_code:
+                reasons.append('得意先コード未入力')
+            if not product_code:
+                reasons.append('商品コード未入力')
+            skipped_rows.append({
+                'source_rows': str(row.get('元データ行') or ''),
+                'reason': ' / '.join(reasons),
+                'sold_date_text': raw_date,
+                'customer_code': customer_code,
+                'source_product_code': str(row.get('商品コード') or '').strip(),
+                'normalized_product_code': product_code,
+                'product_name': str(row.get('商品名') or '').strip(),
+                'sales_category': sales_category,
+                'quantity_text': str(row.get('数量') or '').strip(),
+                'tax_excluded_amount_text': str(row.get('税抜金額') or '').strip(),
+                'gross_profit_amount_text': str(row.get('粗利金額') or '').strip(),
+            })
             continue
 
         key = (current_company, sold_date, customer_code, product_code, sales_category)
         aggregated[key]['quantity'] += parse_number(row.get('数量'))
         aggregated[key]['tax_excluded_amount'] += parse_number(row.get('税抜金額'))
         aggregated[key]['gross_profit_amount'] += parse_number(row.get('粗利金額'))
+        aggregated[key]['source_rows'].append(str(row.get('元データ行') or ''))
+        if not aggregated[key]['product_name']:
+            aggregated[key]['product_name'] = str(row.get('商品名') or '').strip()
 
-    return aggregated, skipped
+    return aggregated, skipped_rows
 
 
 def import_sales_rows(rows, current_company='IKUJI', dry_run=False):
-    aggregated, skipped = aggregate_sales_rows(rows, current_company=current_company)
+    aggregated, skipped_rows = aggregate_sales_rows(rows, current_company=current_company)
     product_dict = {
         product.code: product
         for product in Product.objects.filter(owner_company=current_company)
@@ -177,13 +207,25 @@ def import_sales_rows(rows, current_company='IKUJI', dry_run=False):
 
     create_list = []
     update_list = []
-    missing_products = 0
+    missing_product_rows = []
 
     for key, totals in aggregated.items():
         company, sold_date, customer_code, product_code, sales_category = key
         product = product_dict.get(product_code)
         if not product:
-            missing_products += 1
+            missing_product_rows.append({
+                'source_rows': ', '.join(filter(None, totals['source_rows'])),
+                'reason': '商品マスタ未登録',
+                'sold_date_text': sold_date.strftime('%Y/%m/%d'),
+                'customer_code': customer_code,
+                'source_product_code': product_code,
+                'normalized_product_code': product_code,
+                'product_name': totals['product_name'],
+                'sales_category': sales_category,
+                'quantity_text': str(totals['quantity']),
+                'tax_excluded_amount_text': str(totals['tax_excluded_amount']),
+                'gross_profit_amount_text': str(totals['gross_profit_amount']),
+            })
             continue
 
         if key in existing_sales:
@@ -224,8 +266,9 @@ def import_sales_rows(rows, current_company='IKUJI', dry_run=False):
         'aggregated': len(aggregated),
         'created': len(create_list),
         'updated': len(update_list),
-        'missing_products': missing_products,
-        'skipped': skipped,
+        'missing_products': len(missing_product_rows),
+        'skipped': len(skipped_rows),
+        'skip_rows': skipped_rows + missing_product_rows,
     }
 
 

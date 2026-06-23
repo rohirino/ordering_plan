@@ -124,6 +124,7 @@
             {% if latest_skip_log %}<a class="btn" href="{% url 'download_sales_import_skips' latest_skip_log.id %}?current_company={{ current_company }}">スキップCSV（{{ latest_skip_log.sales_skips.count }}件）</a>{% endif %}
             <input type="file" name="csv_file" accept=".csv" required>
             <button type="submit" class="primary">CSV取込</button>
+            <span style="font-size: 11px; color: #57606a; font-weight: bold;">必須列以外はそのまま含めて取り込めます。</span>
         </form>
     </div>
 

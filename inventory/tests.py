@@ -315,9 +315,10 @@ class ImportProductsCommandTests(TestCase):
         self.assertEqual(response.status_code, 200)
         rows = list(csv.reader(io.StringIO(response.content.decode('cp932'))))
         self.assertEqual(rows[0][0], '売上明細表,雛形')
-        self.assertEqual(rows[1][0], '【日付期間：2026年 6月 1日 ～ 2026年 6月 1日】')
-        self.assertEqual(rows[2], ['コード', '得意先名', '伝票日付', '区分', '仕入先', 'コード', '商品名', '数量', '税抜金額', '粗利金額'])
-        self.assertEqual(len(rows[3][5]), 10)
+        self.assertIn('その他の列は無視して取り込みます。', rows[1][0])
+        self.assertEqual(rows[2][0], '【日付期間：2026年 6月 1日 ～ 2026年 6月 1日】')
+        self.assertEqual(rows[3], ['コード', '得意先名', '伝票日付', '区分', '仕入先', 'コード', '商品名', '数量', '税抜金額', '粗利金額'])
+        self.assertEqual(len(rows[4][5]), 10)
 
     def test_inventory_upload_normalizes_code_and_replaces_product_warehouse_stock(self):
         product = Product.objects.create(code='6460010', name='グリップ シート', owner_company='IKUJI')

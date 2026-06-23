@@ -7,13 +7,14 @@ from django.views.decorators.http import require_POST
 from django.contrib import messages
 from django.http import HttpResponse
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, Order, ShipmentSchedule, ArrivalSchedule, ProductVariant, InventoryState, ImportLog, SalesImportSkip
+from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, Order, ShipmentSchedule, ArrivalSchedule, ProductVariant, InventoryState, InventoryValuationSnapshot, ImportLog, SalesImportSkip
 from .product_importer import import_uploaded_product_file
 from .sales_importer import import_uploaded_sales_file
 from .valuation_service import (
     available_inventory_dates,
     import_inventory_state_master,
     import_valuation_snapshot,
+    normalize_warehouse_name,
     parse_inventory_date,
     sync_snapshot_to_planning_inventory,
     valuation_context,
@@ -254,7 +255,7 @@ def planning_dashboard(request):
     if current_company not in ['IKUJI', 'SELECT']: current_company = 'IKUJI'
     if current_company == 'SELECT': Product.objects.filter(owner_company='SELECT', demand_source='IKUJI').update(demand_source='SELECT')
     _recalculate_abc_ranks(current_company)
-    ikuji_warehouses = Warehouse.objects.filter(owner_company='IKUJI')
+    ikuji_warehouses = Warehouse.objects.filter(owner_company='IKUJI', is_active=True)
     shared_wh_ids = [int(x) for x in request.GET.getlist('shared_whs') if x.isdigit()]
     active_filter = request.GET.get('active_filter', 'active')
     if active_filter not in ['active', 'all']: active_filter = 'active'
@@ -310,8 +311,11 @@ def planning_dashboard(request):
     arrivals = ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date)
     arr_map = _build_arrival_map(arrivals)
     date_list = [base_date + timedelta(days=i) for i in range(120)]
-    all_warehouses = Warehouse.objects.filter(owner_company=current_company)
-    wh_inv_records = WarehouseInventory.objects.select_related('warehouse', 'product').filter(Q(warehouse__owner_company=current_company) | Q(warehouse_id__in=shared_wh_ids))
+    all_warehouses = Warehouse.objects.filter(owner_company=current_company, is_active=True)
+    wh_inv_records = WarehouseInventory.objects.select_related('warehouse', 'product').filter(
+        Q(warehouse__owner_company=current_company, warehouse__is_active=True)
+        | Q(warehouse_id__in=shared_wh_ids, warehouse__is_active=True)
+    )
     wh_stock_map, cross_company_wh_stock, cross_company_stock = {}, {}, {}
     for rec in wh_inv_records:
         if rec.warehouse.owner_company == current_company: wh_stock_map.setdefault(rec.product_id, {})[rec.warehouse_id] = rec.quantity
@@ -632,11 +636,22 @@ def valuation_dashboard(request):
     ctx = valuation_context(selected_date, current_company)
     variant_rows, variant_filter_context = _filter_valuation_variant_rows(ctx['variant_summary'], request.GET)
     ctx['variant_summary'] = variant_rows
+    cleanup_candidates = []
+    for warehouse in Warehouse.objects.filter(owner_company=current_company, is_active=True).order_by('name'):
+        planning_quantity = WarehouseInventory.objects.filter(warehouse=warehouse).aggregate(total=Sum('quantity'))['total'] or 0
+        valuation_quantity = InventoryValuationSnapshot.objects.filter(
+            warehouse=warehouse,
+            inventory_date=selected_date,
+            owner_company=current_company,
+        ).aggregate(total=Sum('quantity'))['total'] or 0
+        if planning_quantity == 0 and valuation_quantity == 0:
+            cleanup_candidates.append(warehouse)
     ctx.update({
         'current_company': current_company,
         'selected_date': selected_date,
         'available_dates': available_inventory_dates(current_company),
         'import_logs': _recent_import_logs('valuation'),
+        'warehouse_cleanup_candidates': cleanup_candidates,
     })
     ctx.update(variant_filter_context)
     return render(request, 'inventory/valuation_dashboard.html', ctx)
@@ -968,7 +983,18 @@ def import_inventory_csv(request):
             reader = _get_csv_reader(request.FILES['csv_file']); headers = reader.fieldnames
             if not headers or '商品コード' not in headers: return redirect('/?current_company=' + current_company)
             warehouse_headers = [wh_name for wh_name in headers if wh_name != '商品コード']
-            wh_map = {wh_name: Warehouse.objects.get_or_create(name=wh_name, owner_company=current_company, defaults={'is_transit': "移動中" in wh_name})[0] for wh_name in warehouse_headers}
+            wh_map = {}
+            for source_warehouse_name in warehouse_headers:
+                wh_name = normalize_warehouse_name(source_warehouse_name)
+                warehouse, _ = Warehouse.objects.get_or_create(
+                    name=wh_name,
+                    owner_company=current_company,
+                    defaults={'is_transit': "移動中" in wh_name},
+                )
+                if not warehouse.is_active:
+                    warehouse.is_active = True
+                    warehouse.save(update_fields=['is_active'])
+                wh_map[source_warehouse_name] = warehouse
             products = {p.code: p for p in Product.objects.filter(owner_company=current_company)}
             try: selected_date = datetime.datetime.strptime(request.POST.get('inventory_date', ''), '%Y-%m-%d').date()
             except: selected_date = datetime.date.today()
@@ -1022,8 +1048,8 @@ def import_inventory_csv(request):
 def download_csv_template(request, template_type):
     current_company = request.GET.get('current_company', 'IKUJI'); scode = "0040006" if current_company == 'SELECT' else "5100299"
     if template_type == 'inventory':
-        current_warehouses = Warehouse.objects.filter(owner_company=current_company)
-        cols = ",".join([wh.name for wh in current_warehouses]) if current_warehouses else "ペットセレクト倉庫,ペットセレクト移動中" if current_company == 'SELECT' else "ニチイク在庫,岸和田在庫,西松屋預託,西松屋移動中"
+        current_warehouses = Warehouse.objects.filter(owner_company=current_company, is_active=True)
+        cols = ",".join([wh.name for wh in current_warehouses]) if current_warehouses else "ペットセレクト倉庫,ペットセレクト移動中" if current_company == 'SELECT' else "ﾆﾁｲｸ物流,岸和田倉庫,西松屋,西松屋移動中"
         ccnt = current_warehouses.count() if current_warehouses else 2 if current_company == 'SELECT' else 4
         content = f"商品コード,{cols}\n{scode},{','.join(['0']*ccnt)}\n"
     else:
@@ -1233,9 +1259,9 @@ def export_products_csv(request):
     res.write(buf.getvalue().encode('cp932', errors='replace')); return res
 
 def export_inventory_csv(request):
-    cc = request.GET.get('current_company', 'IKUJI'); whs = Warehouse.objects.filter(owner_company=cc); invs = Inventory.objects.select_related('product').filter(product__owner_company=cc)
+    cc = request.GET.get('current_company', 'IKUJI'); whs = Warehouse.objects.filter(owner_company=cc, is_active=True); invs = Inventory.objects.select_related('product').filter(product__owner_company=cc)
     w_map = {}
-    for r in WarehouseInventory.objects.filter(warehouse__owner_company=cc): w_map.setdefault(r.product_id, {})[r.warehouse_id] = r.quantity
+    for r in WarehouseInventory.objects.filter(warehouse__owner_company=cc, warehouse__is_active=True): w_map.setdefault(r.product_id, {})[r.warehouse_id] = r.quantity
     res = HttpResponse(content_type='text/csv'); res['Content-Disposition'] = f'attachment; filename="inventory_{cc}.csv"'
     buf = io.StringIO(); writer = csv.writer(buf); writer.writerow(['商品コード', '商品名', '現在庫数（合算）', '安全在庫数'] + [w.name for w in whs])
     for i in invs:
@@ -1372,7 +1398,7 @@ def download_valuation_template(request):
         if current_company == 'SELECT'
         else ['ニチイク物流', '岸和田倉庫', 'PET SELECT', '西松屋', '本社ショールーム', '東京ショールーム', 'B品(ニチイク)', 'B品(岸和田)', '廃棄']
     )
-    warehouses = list(Warehouse.objects.filter(owner_company=current_company).values_list('name', flat=True)) or default_warehouses
+    warehouses = list(Warehouse.objects.filter(owner_company=current_company, is_active=True).values_list('name', flat=True)) or default_warehouses
     sample_code = '0040007001' if current_company == 'IKUJI' else '0040006001'
     sample = [sample_code, 'サンプル商品名称', 'A品', '1000'] + ['0'] * len(warehouses)
     buf = io.StringIO()
@@ -1452,10 +1478,23 @@ def delete_sales_history_period(request):
 @require_POST
 def delete_warehouse(request, warehouse_id):
     current_company = request.POST.get('current_company', 'IKUJI')
-    wh = get_object_or_404(Warehouse, id=warehouse_id); wh_name = wh.name; wh.delete()
-    _recalculate_abc_ranks(current_company)
-    messages.info(request, f"倉庫［{wh_name}］を完全に消去しました。")
-    return redirect('/?current_company=' + current_company)
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    warehouse = get_object_or_404(Warehouse, id=warehouse_id, owner_company=current_company)
+    inventory_date = parse_inventory_date(request.POST.get('inventory_date'), current_company)
+    planning_quantity = WarehouseInventory.objects.filter(warehouse=warehouse).aggregate(total=Sum('quantity'))['total'] or 0
+    valuation_quantity = InventoryValuationSnapshot.objects.filter(
+        warehouse=warehouse,
+        inventory_date=inventory_date,
+        owner_company=current_company,
+    ).aggregate(total=Sum('quantity'))['total'] or 0
+    if planning_quantity != 0 or valuation_quantity != 0:
+        messages.error(request, f"倉庫［{warehouse.name}］には在庫が残っているため、一覧から削除できません。")
+    else:
+        warehouse.is_active = False
+        warehouse.save(update_fields=['is_active'])
+        messages.success(request, f"倉庫［{warehouse.name}］を一覧と棚卸CSV雛形から削除しました。過去の棚卸履歴は保持されています。")
+    return redirect(f'/valuation/?current_company={current_company}&inventory_date={inventory_date:%Y-%m-%d}')
 
 def about_app(request):
     current_company = request.GET.get('current_company', 'IKUJI')

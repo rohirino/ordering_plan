@@ -20,6 +20,11 @@ from inventory.models import (
 
 ENCODINGS = ('cp932', 'utf-8-sig', 'utf-8', 'shift_jis')
 SELECT_ASSET_STATE_CODES = {'400', '401', '404'}
+WAREHOUSE_NAME_ALIASES = {
+    'ニチイク在庫': 'ﾆﾁｲｸ物流',
+    '岸和田在庫': '岸和田倉庫',
+    '西松屋預託': '西松屋',
+}
 METADATA_COLUMNS = {
     '商品コード', 'コード', '商品名', '状態コード', '状態名',
     '状態別評価原価', '原価', '固定原価', '標準原価', '単価',
@@ -74,6 +79,10 @@ def split_variant_code(raw_code):
     if digit_code and len(digit_code) < 7:
         return digit_code.zfill(7), '000'
     return '', ''
+
+
+def normalize_warehouse_name(name):
+    return WAREHOUSE_NAME_ALIASES.get(str(name or '').strip(), str(name or '').strip())
 
 
 def load_state_name_map():
@@ -170,13 +179,17 @@ def import_valuation_snapshot(uploaded_file, inventory_date, current_company='IK
         touched_variants.add(variant.id)
         touched_companies.add(asset_company)
 
-        for warehouse_name in warehouse_headers:
-            warehouse = Warehouse.objects.get_or_create(
+        for source_warehouse_name in warehouse_headers:
+            warehouse_name = normalize_warehouse_name(source_warehouse_name)
+            warehouse, _ = Warehouse.objects.get_or_create(
                 name=warehouse_name,
                 owner_company=asset_company,
                 defaults={'is_transit': '移動中' in warehouse_name},
-            )[0]
-            quantity, had_error = parse_number(row.get(warehouse_name))
+            )
+            if not warehouse.is_active:
+                warehouse.is_active = True
+                warehouse.save(update_fields=['is_active'])
+            quantity, had_error = parse_number(row.get(source_warehouse_name))
             if had_error:
                 quantity_errors += 1
             if quantity == 0 and unit_cost == 0:

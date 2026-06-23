@@ -43,6 +43,11 @@
         .kpi span { display: block; font-size: 12px; color: #495057; font-weight: bold; }
         .kpi strong { display: block; margin-top: 4px; font-size: 24px; line-height: 1; letter-spacing: 0; }
         .warehouse-panel { margin-bottom: 10px; }
+        .warehouse-cleanup { margin-top: 8px; font-size: 12px; }
+        .warehouse-cleanup summary { cursor: pointer; font-weight: bold; color: #495057; }
+        .warehouse-cleanup-list { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+        .warehouse-cleanup form { margin: 0; }
+        .warehouse-cleanup .delete-btn { color: #b42318; border-color: #f1aeb5; background: #fff5f5; }
         .lower-grid { display: grid; grid-template-columns: minmax(360px, 0.7fr) minmax(620px, 1.3fr); gap: 10px; align-items: stretch; }
         .scroll { overflow: auto; border: 1px solid #dee2e6; background: #fff; }
         .warehouse-scroll { max-height: 180px; }
@@ -165,6 +170,23 @@
                 <tbody>{% for row in warehouse_summary %}<tr><td>{{ row.warehouse__name }}</td><td class="num">{{ row.quantity|default:0|comma }}</td><td class="num">{{ row.amount|default:0|comma }}</td></tr>{% empty %}<tr><td colspan="3">データがありません。</td></tr>{% endfor %}</tbody>
             </table>
         </div>
+        <details class="warehouse-cleanup">
+            <summary>在庫ゼロの倉庫を整理</summary>
+            {% if warehouse_cleanup_candidates %}
+                <div class="warehouse-cleanup-list">
+                    {% for warehouse in warehouse_cleanup_candidates %}
+                        <form action="{% url 'delete_warehouse' warehouse.id %}" method="POST" onsubmit="return confirm('倉庫「{{ warehouse.name|escapejs }}」を一覧と棚卸CSV雛形から削除します。過去の棚卸履歴は残ります。よろしいですか？');">
+                            {% csrf_token %}
+                            <input type="hidden" name="current_company" value="{{ current_company }}">
+                            <input type="hidden" name="inventory_date" value="{{ selected_date|date:'Y-m-d' }}">
+                            <button type="submit" class="delete-btn">{{ warehouse.name }} を削除</button>
+                        </form>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="count-note" style="margin-top: 6px;">整理できる在庫ゼロの倉庫はありません。</div>
+            {% endif %}
+        </details>
     </div>
 
     <div class="lower-grid">

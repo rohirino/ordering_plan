@@ -71,6 +71,7 @@ class Warehouse(models.Model):
     # ★修正：unique=True を削除
     name = models.CharField(verbose_name="倉庫名", max_length=100)
     is_transit = models.BooleanField(verbose_name="移動中フラグ", default=False)
+    is_active = models.BooleanField(verbose_name="運用中フラグ", default=True)
     owner_company = models.CharField(verbose_name="所有会社", max_length=20, choices=COMPANY_CHOICES, default='IKUJI')
 
     def __str__(self):

@@ -750,6 +750,8 @@ class ImportProductsCommandTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(Inventory.objects.get(product=product).current_quantity, 16)
         self.assertEqual(WarehouseInventory.objects.filter(product=product).count(), 2)
+        self.assertTrue(Warehouse.objects.filter(name='ﾆﾁｲｸ物流', owner_company='IKUJI').exists())
+        self.assertTrue(Warehouse.objects.filter(name='岸和田倉庫', owner_company='IKUJI').exists())
 
     def test_valuation_upload_rounds_state_cost_to_nearest_yen(self):
         rows = [
@@ -765,6 +767,37 @@ class ImportProductsCommandTests(TestCase):
         snapshot = InventoryValuationSnapshot.objects.get()
         self.assertEqual(snapshot.unit_cost, 1001)
         self.assertEqual(snapshot.amount, 2002)
+
+    def test_zero_stock_warehouse_can_be_removed_from_operational_lists(self):
+        warehouse = Warehouse.objects.create(name='使用しない倉庫', owner_company='IKUJI')
+
+        response = self.client.post(
+            reverse('delete_warehouse', args=[warehouse.id]),
+            {'current_company': 'IKUJI', 'inventory_date': '2026-05-31'},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        warehouse.refresh_from_db()
+        self.assertFalse(warehouse.is_active)
+        template_response = self.client.get(
+            reverse('download_valuation_template'),
+            {'current_company': 'IKUJI'},
+        )
+        self.assertNotIn('使用しない倉庫', template_response.content.decode('cp932'))
+
+    def test_warehouse_with_stock_cannot_be_removed(self):
+        product = Product.objects.create(code='7654321', name='在庫あり商品', owner_company='IKUJI')
+        warehouse = Warehouse.objects.create(name='在庫あり倉庫', owner_company='IKUJI')
+        WarehouseInventory.objects.create(product=product, warehouse=warehouse, quantity=1)
+
+        response = self.client.post(
+            reverse('delete_warehouse', args=[warehouse.id]),
+            {'current_company': 'IKUJI', 'inventory_date': '2026-05-31'},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        warehouse.refresh_from_db()
+        self.assertTrue(warehouse.is_active)
 
     def test_valuation_sync_excludes_variants_marked_not_for_planning_inventory(self):
         rows = [

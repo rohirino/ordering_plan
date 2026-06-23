@@ -233,6 +233,8 @@
                         <label>需要の波(ブレ): <select id="sim_wave" onchange="runLogicSimulator()"><option value="none">なし (安定)</option><option value="small">小 (通常変動)</option><option value="large">大 (急激な波)</option></select></label>
                         <label>リードタイム(LT): <input type="number" id="sim_lt" value="30" style="width: 45px; text-align: center;" oninput="runLogicSimulator()"> 日</label>
                         <label>安全在庫: <input type="number" id="sim_safety" value="30" style="width: 45px; text-align: center;" oninput="runLogicSimulator()"> 個</label>
+                        <label>発注間隔: <input type="number" id="sim_interval" value="0" min="0" style="width: 45px; text-align: center;" oninput="runLogicSimulator()"> 日 <span style="font-size:10px; color:#6c757d;">0=一括</span></label>
+                        <label>最小ロット: <input type="number" id="sim_lot" value="1" min="1" style="width: 45px; text-align: center;" oninput="runLogicSimulator()"> 個</label>
                         <div style="margin-top: 4px; padding: 4px; background: #e6f4ea; border-radius: 4px; border: 1px solid #c3e6cb; font-weight: bold; font-size: 12px; text-align: center;">
                             🎯 算出発注点: <span id="sim_op_val" style="color: #0056b3;">180</span> 個
                         </div>
@@ -262,11 +264,11 @@
             </div>
 
             <table class="order-table">
-                <thead><tr><th>作成日時</th><th>商品コード</th><th>商品名</th><th style="text-align: right;">発注指示数量</th><th>ステータス</th><th style="text-align: center;">アクション</th></tr></thead>
+                <thead><tr><th>作成日時</th><th>発注予定</th><th>入荷予定</th><th>商品コード</th><th>商品名</th><th style="text-align: right;">発注指示数量</th><th>ステータス</th><th style="text-align: center;">アクション</th></tr></thead>
                 <tbody>
                     {% for order in active_orders %}
                     <tr>
-                        <td style="color: #6c757d;">{{ order.created_at|date:"m/d H:i" }}</td><td style="font-weight: bold;">{{ order.product.code }}</td><td>{{ order.product.name }}</td><td style="text-align: right; font-weight: bold; color: #dc3545;">{{ order.quantity }} 個</td>
+                        <td style="color: #6c757d;">{{ order.created_at|date:"m/d H:i" }}</td><td>{{ order.order_date|date:"Y/m/d"|default:"-" }}</td><td>{{ order.expected_arrival_date|date:"Y/m/d"|default:"-" }}</td><td style="font-weight: bold;">{{ order.product.code }}</td><td>{{ order.product.name }}</td><td style="text-align: right; font-weight: bold; color: #dc3545;">{{ order.quantity }} 個</td>
                         <td>{% if order.status == '計画中' %}<span class="status-badge" style="background-color: #ffeeba; color: #856404;">📋 計画中</span>{% elif order.status == '発注済' %}<span class="status-badge" style="background-color: #cce5ff; color: #004085;">✉️ 発注済</span>{% else %}<span class="status-badge" style="background-color: #d4edda; color: #155724;">✅ 入庫済</span>{% endif %}</td>
                         <td style="text-align: center;"><div style="display: flex; gap: 5px; justify-content: center;">
                                 {% if order.status == '計画中' %}<form action="{% url 'update_order_status' order.id %}" method="POST" style="margin:0;">{% csrf_token %}<input type="hidden" name="status" value="発注済"><button type="submit" style="background-color: #007bff; color:white; border:none; padding:2px 5px; border-radius:3px; font-size:9px; font-weight:bold; cursor:pointer;">➔ 発注済にする</button></form>
@@ -274,7 +276,7 @@
                                 <form action="{% url 'delete_order_plan' order.id %}" method="POST" style="margin:0;" onsubmit="return confirm('計画を取り消しますか？');">{% csrf_token %}<button type="submit" style="background-color: #dc3545; color:white; border:none; padding:2px 5px; border-radius:3px; font-size:9px; font-weight:bold; cursor:pointer;">✕ 取消</button></form>
                             </div></td>
                     </tr>
-                    {% empty %}<tr><td colspan="6" style="text-align: center; color: gray; padding: 6px;">現在作成された計画はありません。</td></tr>{% endfor %}
+                    {% empty %}<tr><td colspan="8" style="text-align: center; color: gray; padding: 6px;">現在作成された計画はありません。</td></tr>{% endfor %}
                 </tbody>
             </table>
         </div>
@@ -330,6 +332,8 @@
                                             <div><input type="number" name="lead_time" value="{{ item.product.lead_time }}" min="0"> 日</div>
                                             <label>ロット</label>
                                             <input type="number" name="order_lot" value="{{ item.product.order_lot }}" min="1">
+                                            <label>発注間隔</label>
+                                            <div><input type="number" name="order_interval_days" value="{{ item.product.order_interval_days }}" min="0"> 日 <span style="font-size: 10px; color: #6c757d;">0=一括</span></div>
                                             <label>最低在庫</label>
                                             <div><input type="number" name="safety_stock" value="{{ item.safety_stock }}" min="0"> 個 <span style="font-size: 10px; color: #28a745; font-weight: bold;">推奨:{{ item.suggested_safety_stock }}</span></div>
                                             <label>長期ベース</label>
@@ -440,7 +444,7 @@
                             <div class="shipment-summary">{% for shipment in item.future_shipments|slice:':2' %}{{ shipment.shipment_date|date:"m/d" }} {{ shipment.destination }} {{ shipment.quantity }}個{% if not forloop.last %}<br>{% endif %}{% endfor %}{% if item.future_shipments|length > 2 %}<br>ほか {{ item.future_shipments|length|add:'-2' }}件{% endif %}</div>
                         {% else %}<div class="shipment-summary">登録なし</div>{% endif %}
                     </td>
-                    {% for day in item.forecast_timeline %}<td class="timeline-cell" {% if day.stock <= 0 or day.stock <= item.safety_stock %} style="background-color: #ffcccc; color: Red; font-weight: bold;" {% elif day.stock <= item.order_point %} style="background-color: #fff3cd; color: #b58100; font-weight: bold;" {% endif %}><div>{{ day.stock }}</div><span class="detail-sub">{% if day.ship > 0 %}<span class="ship-text">出:{{ day.ship }}</span>{% endif %}{% if day.arr_kakutei > 0 %}<span class="arr-text">確:{{ day.arr_kakutei }}</span>{% endif %}{% if day.arr_koukaku > 0 %}<span class="arr-ko-text">高:{{ day.arr_koukaku }}</span>{% endif %}{% if day.arr_kibou > 0 %}<span class="arr-ko-text" style="color: #6c757d;">希:{{ day.arr_kibou }}</span>{% endif %}</span></td>{% endfor %}
+                    {% for day in item.forecast_timeline %}<td class="timeline-cell" {% if day.stock <= 0 or day.stock <= item.safety_stock %} style="background-color: #ffcccc; color: Red; font-weight: bold;" {% elif day.stock <= item.order_point %} style="background-color: #fff3cd; color: #b58100; font-weight: bold;" {% endif %}><div>{{ day.stock }}</div><span class="detail-sub">{% if day.ship > 0 %}<span class="ship-text">出:{{ day.ship }}</span>{% endif %}{% if day.planned_order > 0 %}<span class="arr-text">計:{{ day.planned_order }}</span>{% endif %}{% if day.arr_kakutei > 0 %}<span class="arr-text">確:{{ day.arr_kakutei }}</span>{% endif %}{% if day.arr_koukaku > 0 %}<span class="arr-ko-text">高:{{ day.arr_koukaku }}</span>{% endif %}{% if day.arr_kibou > 0 %}<span class="arr-ko-text" style="color: #6c757d;">希:{{ day.arr_kibou }}</span>{% endif %}</span></td>{% endfor %}
                 </tr>
                 {% empty %}<tr> <td colspan="130" style="padding: 10px; text-align: center;">データが見つかりません。</td> </tr>{% endfor %}
             </tbody>
@@ -489,17 +493,24 @@
             const wave = document.getElementById('sim_wave').value;
             const lt = parseInt(document.getElementById('sim_lt').value) || 0;
             const safety = parseInt(document.getElementById('sim_safety').value) || 0;
+            const interval = Math.max(0, parseInt(document.getElementById('sim_interval').value) || 0);
+            const lot = Math.max(1, parseInt(document.getElementById('sim_lot').value) || 1);
             const op = (demand * lt) + safety;
             document.getElementById('sim_op_val').innerText = op;
 
-            let timeline = []; let labels = []; let current = stock; let hasShortage = false; let hasOP = false;
+            let timeline = []; let labels = []; let current = stock; let hasShortage = false; let hasOP = false; let plannedArrivals = {};
             for(let i=0; i<=60; i++) {
                 labels.push("D+" + i);
                 if(i > 0) {
+                    current += plannedArrivals[i] || 0;
                     let actualDemand = demand;
                     if(wave === 'small') { actualDemand += (Math.random() * 4 - 2); }
                     else if(wave === 'large') { actualDemand += (Math.random() * 12 - 6); }
                     current -= Math.max(0, Math.round(actualDemand));
+                    if(interval > 0 && i % interval === 0 && i + lt <= 60 && current <= op) {
+                        const qty = Math.max(lot, Math.ceil((op + demand * interval - current) / lot) * lot);
+                        plannedArrivals[i + lt] = (plannedArrivals[i + lt] || 0) + qty;
+                    }
                 }
                 timeline.push(current);
                 if(current <= 0) hasShortage = true;

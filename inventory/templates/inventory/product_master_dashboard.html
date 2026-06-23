@@ -131,6 +131,7 @@
                 <option value="supplier" {% if product_sort == 'supplier' %}selected{% endif %}>仕入先</option>
                 <option value="lead_time" {% if product_sort == 'lead_time' %}selected{% endif %}>LT</option>
                 <option value="order_lot" {% if product_sort == 'order_lot' %}selected{% endif %}>ロット</option>
+                <option value="order_interval_days" {% if product_sort == 'order_interval_days' %}selected{% endif %}>発注間隔</option>
                 <option value="safety_stock" {% if product_sort == 'safety_stock' %}selected{% endif %}>安全在庫</option>
                 <option value="trend_days" {% if product_sort == 'trend_days' %}selected{% endif %}>長期ベース</option>
                 <option value="demand_source" {% if product_sort == 'demand_source' %}selected{% endif %}>需要参照元</option>
@@ -163,6 +164,7 @@
             <input type="text" name="supplier" placeholder="仕入先" class="supplier-input">
             <input type="number" name="lead_time" value="90" class="num-small" min="0">
             <input type="number" name="order_lot" value="1" class="num-small" min="1">
+            <input type="number" name="order_interval_days" value="0" class="num-small" min="0" title="発注間隔日数（0は一括発注）">
             <input type="number" name="safety_stock" value="20" class="num-small" min="0">
             <select name="trend_days">{% for value, label in trend_days_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
             <select name="lot_rule">{% for value, label in lot_rule_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
@@ -180,6 +182,7 @@
             <div class="bulk-grid">
                 <label class="bulk-item"><input type="checkbox" name="bulk_lead_time_enabled">LT<input type="number" name="bulk_lead_time" value="90" min="0"></label>
                 <label class="bulk-item"><input type="checkbox" name="bulk_order_lot_enabled">ロット<input type="number" name="bulk_order_lot" value="1" min="1"></label>
+                <label class="bulk-item"><input type="checkbox" name="bulk_order_interval_days_enabled">発注間隔<input type="number" name="bulk_order_interval_days" value="0" min="0">日</label>
                 <label class="bulk-item"><input type="checkbox" name="bulk_safety_stock_enabled">安全在庫<input type="number" name="bulk_safety_stock" value="20" min="0"></label>
                 <label class="bulk-item"><input type="checkbox" name="bulk_trend_days_enabled">長期ベース<select name="bulk_trend_days">{% for value, label in trend_days_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
                 <label class="bulk-item"><input type="checkbox" name="bulk_lot_rule_enabled">超過ルール<select name="bulk_lot_rule">{% for value, label in lot_rule_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
@@ -259,7 +262,7 @@
         <table>
             <thead>
                 <tr>
-                    <th>選択</th><th>保存</th><th>商品コード</th><th>商品名</th><th>登録由来</th><th>原価</th><th>仕入先</th><th>LT</th><th>ロット</th><th>安全在庫</th><th>長期ベース</th><th>超過ルール</th><th>需要参照元</th><th>管理外</th><th>廃盤</th><th>処分品発注</th><th>削除</th>
+                    <th>選択</th><th>保存</th><th>商品コード</th><th>商品名</th><th>登録由来</th><th>原価</th><th>仕入先</th><th>LT</th><th>ロット</th><th>発注間隔</th><th>安全在庫</th><th>長期ベース</th><th>超過ルール</th><th>需要参照元</th><th>管理外</th><th>廃盤</th><th>処分品発注</th><th>削除</th>
                 </tr>
             </thead>
             <tbody>
@@ -292,6 +295,7 @@
                     <td><input form="productForm{{ product.id }}" type="text" name="supplier" value="{{ product.supplier|default_if_none:'' }}" class="supplier-input"></td>
                     <td><input form="productForm{{ product.id }}" type="number" name="lead_time" value="{{ product.lead_time }}" class="num-small" min="0"></td>
                     <td><input form="productForm{{ product.id }}" type="number" name="order_lot" value="{{ product.order_lot }}" class="num-small" min="1"></td>
+                    <td><input form="productForm{{ product.id }}" type="number" name="order_interval_days" value="{{ product.order_interval_days }}" class="num-small" min="0">日</td>
                     <td><input form="productForm{{ product.id }}" type="number" name="safety_stock" value="{{ product.safety_stock }}" class="num-small" min="0"></td>
                     <td><select form="productForm{{ product.id }}" name="trend_days" class="select-mid">{% for value, label in trend_days_choices %}<option value="{{ value }}" {% if product.trend_days == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
                     <td><select form="productForm{{ product.id }}" name="lot_rule" class="select-mid">{% for value, label in lot_rule_choices %}<option value="{{ value }}" {% if product.lot_rule == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>

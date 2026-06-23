@@ -149,6 +149,14 @@ def _build_arrival_map(queryset):
         arr_map[a.product_id][a.arrival_date][a.status] += a.quantity
     return arr_map
 
+def _build_order_arrival_map(queryset):
+    order_map = {}
+    for order in queryset:
+        if order.expected_arrival_date:
+            order_map.setdefault(order.product_id, {}).setdefault(order.expected_arrival_date, 0)
+            order_map[order.product_id][order.expected_arrival_date] += order.quantity
+    return order_map
+
 def _get_planning_base_date(target_company='IKUJI'):
     latest_sales_date = SalesHistory.objects.filter(
         company=target_company,
@@ -224,7 +232,7 @@ def _recalculate_abc_ranks(target_company='IKUJI'):
                 
     Product.objects.bulk_update(p_dict.values(), ['abc_rank'])
 
-def _execute_single_order_plan(product, inventory, base_date, future_end_date, sales_map_select, sales_map_ikuji, ship_map, arr_map):
+def _execute_single_order_plan(product, inventory, base_date, future_end_date, sales_map_select, sales_map_ikuji, ship_map, arr_map, existing_order_map=None):
     pid = product.id
     sales_data = sales_map_select.get(pid, {'sum_30': 0, 'sum_long': 0}) if product.demand_source == 'SELECT' else sales_map_ikuji.get(pid, {'sum_30': 0, 'sum_long': 0})
     tdays = product.trend_days if product.trend_days in [90, 120, 150, 180] else 90
@@ -236,21 +244,64 @@ def _execute_single_order_plan(product, inventory, base_date, future_end_date, s
     order_point = (daily_demand * product.lead_time) + inventory.safety_stock
     product_ships = ship_map.get(pid, {})
     product_arrivals = arr_map.get(pid, {})
-    running_stock = inventory.current_quantity
-    min_stock = running_stock
-    for i in range(120):
-        d = base_date + timedelta(days=i)
-        day_ship = product_ships.get(d, 0)
-        arr_total = product_arrivals.get(d, {}).get('確定', 0) + product_arrivals.get(d, {}).get('高確度', 0)
-        running_stock = running_stock + arr_total - max(day_ship, daily_demand)
-        if running_stock < min_stock: min_stock = running_stock
-    shortage = order_point - min_stock if min_stock < order_point else 0
-    if shortage > 0:
-        lot = product.order_lot if product.order_lot > 0 else 1
-        qty = max(lot, math.ceil(shortage)) if product.lot_rule == 'MIN_LOT_ONLY' else math.ceil(shortage / lot) * lot
-        Order.objects.create(product=product, quantity=qty, status='計画中')
-        return True
-    return False
+    existing_arrivals = (existing_order_map or {}).get(pid, {})
+    horizon_days = (future_end_date - base_date).days
+
+    def forecast(order_arrivals):
+        running_stock = inventory.current_quantity
+        stocks = {}
+        for i in range(horizon_days):
+            day = base_date + timedelta(days=i)
+            scheduled_arrival = order_arrivals.get(day, 0)
+            normal_arrival = product_arrivals.get(day, {}).get('確定', 0) + product_arrivals.get(day, {}).get('高確度', 0)
+            running_stock += scheduled_arrival + normal_arrival - max(product_ships.get(day, 0), daily_demand)
+            stocks[day] = running_stock
+        return stocks
+
+    def rounded_quantity(shortage):
+        lot = max(1, product.order_lot)
+        return max(lot, math.ceil(shortage)) if product.lot_rule == 'MIN_LOT_ONLY' else math.ceil(shortage / lot) * lot
+
+    interval_days = max(0, product.order_interval_days or 0)
+    if interval_days == 0:
+        stocks = forecast(existing_arrivals)
+        min_stock = min(stocks.values(), default=inventory.current_quantity)
+        shortage = order_point - min_stock if min_stock < order_point else 0
+        if shortage <= 0:
+            return 0
+        Order.objects.create(
+            product=product,
+            quantity=rounded_quantity(shortage),
+            order_date=base_date,
+            expected_arrival_date=base_date + timedelta(days=product.lead_time),
+            status='計画中',
+        )
+        return 1
+
+    created_count = 0
+    planned_arrivals = {date: quantity for date, quantity in existing_arrivals.items()}
+    for offset in range(0, horizon_days, interval_days):
+        order_date = base_date + timedelta(days=offset)
+        arrival_date = order_date + timedelta(days=product.lead_time)
+        if arrival_date > future_end_date - timedelta(days=1):
+            continue
+        stocks = forecast(planned_arrivals)
+        projected_stock = stocks.get(arrival_date, inventory.current_quantity)
+        target_stock = order_point + (daily_demand * interval_days)
+        shortage = target_stock - projected_stock
+        if shortage <= 0:
+            continue
+        quantity = rounded_quantity(shortage)
+        planned_arrivals[arrival_date] = planned_arrivals.get(arrival_date, 0) + quantity
+        Order.objects.create(
+            product=product,
+            quantity=quantity,
+            order_date=order_date,
+            expected_arrival_date=arrival_date,
+            status='計画中',
+        )
+        created_count += 1
+    return created_count
 
 def planning_dashboard(request):
     current_company = request.GET.get('current_company', 'IKUJI')
@@ -316,6 +367,12 @@ def planning_dashboard(request):
         shipment_detail_map.setdefault(s.product_id, []).append(s)
     arrivals = ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date)
     arr_map = _build_arrival_map(arrivals)
+    active_orders = Order.objects.select_related('product').filter(
+        product__owner_company=current_company,
+    ).order_by('order_date', 'created_at')
+    planned_order_map = _build_order_arrival_map(
+        active_orders.filter(status__in=['計画中', '発注済'], expected_arrival_date__gte=base_date, expected_arrival_date__lte=future_end_date)
+    )
     date_list = [base_date + timedelta(days=i) for i in range(120)]
     all_warehouses = Warehouse.objects.filter(owner_company=current_company, is_active=True)
     wh_inv_records = WarehouseInventory.objects.select_related('warehouse', 'product').filter(
@@ -338,10 +395,10 @@ def planning_dashboard(request):
         k_daily_demand = (k_sales.get('sum_long', 0) / k_tdays) * max(k_item.product.trend_min, min(((k_sales.get('sum_30', 0) / 30) / (k_sales.get('sum_long', 0) / k_tdays) if k_sales.get('sum_long', 0) > 0 else 1.0), k_item.product.trend_max))
         k_order_point = (k_daily_demand * k_item.product.lead_time) + k_item.safety_stock
         k_stock = sum(wh_stock_map.get(k_pid, {}).values()) + cross_company_stock.get(k_item.product.code, 0) if current_company == 'SELECT' else sum(wh_stock_map.get(k_pid, {}).values())
-        k_ships = ship_map.get(k_pid, {}); k_arrs = arr_map.get(k_pid, {}); k_has_shortage, k_has_op = False, False
+        k_ships = ship_map.get(k_pid, {}); k_arrs = arr_map.get(k_pid, {}); k_orders = planned_order_map.get(k_pid, {}); k_has_shortage, k_has_op = False, False
         for i in range(120):
             d = base_date + timedelta(days=i)
-            k_stock = k_stock + k_arrs.get(d, {}).get('確定', 0) + k_arrs.get(d, {}).get('高確度', 0) - max(k_ships.get(d, 0), k_daily_demand)
+            k_stock = k_stock + k_orders.get(d, 0) + k_arrs.get(d, {}).get('確定', 0) + k_arrs.get(d, {}).get('高確度', 0) - max(k_ships.get(d, 0), k_daily_demand)
             if k_stock <= 0: k_has_shortage = True
             elif k_stock <= k_order_point: k_has_op = True
         if k_item.product.abc_rank != 'DEAD' or k_item.product.allow_dead_order:
@@ -353,7 +410,6 @@ def planning_dashboard(request):
         m_end = current_target - timedelta(days=1)
         inventory_date_choices.append({'value': m_end.strftime('%Y-%m-%d'), 'display': m_end.strftime('%Y年%m月末')})
         current_target = m_end.replace(day=1)
-    active_orders = Order.objects.select_related('product').filter(product__owner_company=current_company).order_by('-created_at')
     visible_inventories = []
     for item in page_obj:
         pid = item.product.id; pcode = item.product.code
@@ -384,13 +440,14 @@ def planning_dashboard(request):
         item.forecast_timeline = []
         item.future_shipments = shipment_detail_map.get(pid, [])
         running_stock = item.current_quantity; has_shortage_risk, has_order_point_risk = False, False
-        product_ships, product_arrivals = ship_map.get(pid, {}), arr_map.get(pid, {})
+        product_ships, product_arrivals, product_orders = ship_map.get(pid, {}), arr_map.get(pid, {}), planned_order_map.get(pid, {})
         first_shortage_date = None
         for d in date_list:
             day_ship = product_ships.get(d, 0); day_arr_dict = product_arrivals.get(d, {})
-            arr_total = day_arr_dict.get('確定', 0) + day_arr_dict.get('高確度', 0)
+            planned_order_total = product_orders.get(d, 0)
+            arr_total = day_arr_dict.get('確定', 0) + day_arr_dict.get('高確度', 0) + planned_order_total
             running_stock = running_stock + arr_total - max(day_ship, daily_demand)
-            item.forecast_timeline.append({'date': d, 'stock': round(running_stock, 1), 'ship': day_ship, 'arr_kakutei': day_arr_dict.get('確定', 0), 'arr_koukaku': day_arr_dict.get('高確度', 0), 'arr_kibou': day_arr_dict.get('希望', 0)})
+            item.forecast_timeline.append({'date': d, 'stock': round(running_stock, 1), 'ship': day_ship, 'planned_order': planned_order_total, 'arr_kakutei': day_arr_dict.get('確定', 0), 'arr_koukaku': day_arr_dict.get('高確度', 0), 'arr_kibou': day_arr_dict.get('希望', 0)})
             if running_stock <= 0:
                 has_shortage_risk = True
                 if not first_shortage_date: first_shortage_date = d
@@ -439,6 +496,7 @@ def product_master_dashboard(request):
         'price': 'price',
         'lead_time': 'lead_time',
         'order_lot': 'order_lot',
+        'order_interval_days': 'order_interval_days',
         'safety_stock': 'inventory__safety_stock',
         'trend_days': 'trend_days',
         'demand_source': 'demand_source',
@@ -701,6 +759,7 @@ def create_product(request):
             lead_time=int(request.POST.get('lead_time') or 90),
             order_lot=int(request.POST.get('order_lot') or 1),
             lot_rule=request.POST.get('lot_rule', 'ROUND_UP_LOT'),
+            order_interval_days=max(0, int(request.POST.get('order_interval_days') or 0)),
             trend_days=int(request.POST.get('trend_days') or 90),
             is_excluded='is_excluded' in request.POST,
             is_discontinued='is_discontinued' in request.POST,
@@ -765,6 +824,7 @@ def update_product_config(request, product_id):
         product.lead_time = int(request.POST.get('lead_time', '90'))
         product.order_lot = int(request.POST.get('order_lot', '1'))
         product.lot_rule = request.POST.get('lot_rule', 'ROUND_UP_LOT')
+        product.order_interval_days = max(0, int(request.POST.get('order_interval_days', '0')))
         product.trend_days = int(request.POST.get('trend_days', '90'))
         product.is_excluded = 'is_excluded' in request.POST
         product.is_discontinued = 'is_discontinued' in request.POST
@@ -799,6 +859,9 @@ def bulk_update_products(request):
         if 'bulk_order_lot_enabled' in request.POST:
             product_updates['order_lot'] = max(1, int(request.POST.get('bulk_order_lot') or 1))
             update_fields.append('ロット')
+        if 'bulk_order_interval_days_enabled' in request.POST:
+            product_updates['order_interval_days'] = max(0, int(request.POST.get('bulk_order_interval_days') or 0))
+            update_fields.append('発注間隔')
         if 'bulk_trend_days_enabled' in request.POST:
             product_updates['trend_days'] = int(request.POST.get('bulk_trend_days') or 90)
             update_fields.append('長期ベース')
@@ -972,7 +1035,9 @@ def create_order_plan(request, product_id):
         else: s_map_select[item['product_id']] = item
     ship_map = {s['product_id']: {s['shipment_date']: s['total']} for s in ShipmentSchedule.objects.filter(shipment_date__gte=base_date, shipment_date__lte=future_end_date).values('product_id', 'shipment_date').annotate(total=Sum('quantity'))}
     arr_map = _build_arrival_map(ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date))
-    if _execute_single_order_plan(product, inventory, base_date, future_end_date, s_map_select, s_map_ikuji, ship_map, arr_map): messages.success(request, f"商品［{product.code}］の発注計画を作成しました。")
+    existing_order_map = _build_order_arrival_map(Order.objects.filter(product=product, status__in=['計画中', '発注済']))
+    created_count = _execute_single_order_plan(product, inventory, base_date, future_end_date, s_map_select, s_map_ikuji, ship_map, arr_map, existing_order_map)
+    if created_count: messages.success(request, f"商品［{product.code}］の発注計画を {created_count} 件作成しました。")
     else: messages.info(request, "発注基準を満たしていないためスキップしました。")
     return redirect(request.META.get('HTTP_REFERER', 'planning_dashboard'))
 
@@ -1009,12 +1074,14 @@ def bulk_create_order_plan(request):
     ship_map, arr_map = {}, {}
     for s in ShipmentSchedule.objects.filter(shipment_date__gte=base_date, shipment_date__lte=future_end_date): ship_map.setdefault(s.product_id, {})[s.shipment_date] = ship_map.setdefault(s.product_id, {}).get(s.shipment_date, 0) + s.quantity
     arr_map = _build_arrival_map(ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date))
+    existing_order_map = _build_order_arrival_map(Order.objects.filter(product_id__in=products_by_id, status__in=['計画中', '発注済']))
     inventories = {inv.product_id: inv for inv in Inventory.objects.filter(product_id__in=products_by_id)}
-    success_cnt = 0
+    created_count = 0
     for p in products:
         inv = inventories.get(p.id)
-        if inv and _execute_single_order_plan(p, inv, base_date, future_end_date, s_map_select, s_map_ikuji, ship_map, arr_map): success_cnt += 1
-    messages.success(request, f"一括発注計算完了！（{success_cnt}件の計画を新規生成）")
+        if inv:
+            created_count += _execute_single_order_plan(p, inv, base_date, future_end_date, s_map_select, s_map_ikuji, ship_map, arr_map, existing_order_map)
+    messages.success(request, f"一括発注計算完了！（{created_count}件の計画を新規生成）")
     return redirect('/?current_company=' + current_company)
 
 @require_POST

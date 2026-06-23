@@ -254,6 +254,31 @@ class ImportProductsCommandTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(Order.objects.get(product=product).quantity, 25)
 
+    def test_split_order_interval_creates_multiple_planned_orders_and_updates_timeline(self):
+        today = datetime.date.today()
+        product = Product.objects.create(
+            code='1234568', name='分割発注商品', owner_company='IKUJI',
+            demand_source='IKUJI', lead_time=0, order_lot=10, order_interval_days=30,
+        )
+        Inventory.objects.create(product=product, current_quantity=0, safety_stock=0)
+        SalesHistory.objects.create(
+            product=product, sold_date=today - datetime.timedelta(days=1),
+            quantity=900, customer='C001', sales_category='売上', company='IKUJI',
+        )
+
+        response = self.client.post(
+            reverse('bulk_create_order_plan'),
+            {'current_company': 'IKUJI', 'selected_products': [str(product.id)]},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        orders = list(Order.objects.filter(product=product).order_by('order_date'))
+        self.assertGreater(len(orders), 1)
+        self.assertEqual(orders[1].order_date - orders[0].order_date, datetime.timedelta(days=30))
+        self.assertTrue(all(order.quantity >= 10 for order in orders))
+        dashboard = self.client.get(reverse('planning_dashboard'), {'current_company': 'IKUJI', 'active_filter': 'all'})
+        self.assertContains(dashboard, '計:')
+
     def test_planning_dashboard_uses_half_of_long_term_days_for_mid_term_display(self):
         today = datetime.date.today()
         product = Product.objects.create(

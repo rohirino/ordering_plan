@@ -12,7 +12,7 @@ class WarehouseAdmin(admin.ModelAdmin):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ('code', 'name', 'supplier', 'price', 'lead_time', 'order_lot')
+    list_display = ('code', 'name', 'supplier', 'price', 'lead_time', 'order_lot', 'order_interval_days')
     search_fields = ('code', 'name', 'supplier')
     inlines = [WarehouseInventoryInline]
 
@@ -62,7 +62,7 @@ class ShipmentScheduleAdmin(admin.ModelAdmin):
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
-    list_display = ('created_at', 'get_code', 'get_name', 'quantity', 'status')
+    list_display = ('created_at', 'order_date', 'expected_arrival_date', 'get_code', 'get_name', 'quantity', 'status')
     list_filter = ('status',)
     search_fields = ('product__code', 'product__name')
 

@@ -1,6 +1,7 @@
 import csv
 import datetime
 import io
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.db.models import Sum
 from django.utils import timezone
@@ -48,6 +49,19 @@ def parse_number(value):
     try:
         return int(float(text)), False
     except (ValueError, TypeError):
+        return 0, True
+
+
+def parse_cost(value):
+    """評価原価は円単位へ四捨五入し、数量の整数変換とは分けて扱う。"""
+    if value in (None, ''):
+        return 0, False
+    text = str(value).replace(',', '').strip()
+    if not text:
+        return 0, False
+    try:
+        return int(Decimal(text).quantize(Decimal('1'), rounding=ROUND_HALF_UP)), False
+    except (InvalidOperation, ValueError, TypeError):
         return 0, True
 
 
@@ -136,7 +150,7 @@ def import_valuation_snapshot(uploaded_file, inventory_date, current_company='IK
         if update_fields:
             product.save(update_fields=update_fields)
 
-        unit_cost, cost_error = parse_number(get_row_value(row, '状態別評価原価', '原価', '固定原価', '標準原価', '単価'))
+        unit_cost, cost_error = parse_cost(get_row_value(row, '状態別評価原価', '原価', '固定原価', '標準原価', '単価'))
         if cost_error:
             unit_cost = 0
 

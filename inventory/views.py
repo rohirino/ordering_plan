@@ -267,11 +267,12 @@ def planning_dashboard(request):
     show_discontinued = request.GET.get('show_discontinued') == '1'
     base_date = _get_planning_base_date(current_company)
     thirty_days_ago = base_date - timedelta(days=30)
-    sixty_days_ago = base_date - timedelta(days=60)
     long_check_date = base_date - timedelta(days=months_val * 30)
     sales_summary = SalesHistory.objects.filter(sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(
         sum_30=Sum(Case(When(sold_date__gte=thirty_days_ago, then='quantity'), default=0, output_field=IntegerField())),
-        sum_60=Sum(Case(When(sold_date__gte=sixty_days_ago, then='quantity'), default=0, output_field=IntegerField())),
+        sum_45=Sum(Case(When(sold_date__gte=base_date - timedelta(days=45), then='quantity'), default=0, output_field=IntegerField())),
+        sum_60=Sum(Case(When(sold_date__gte=base_date - timedelta(days=60), then='quantity'), default=0, output_field=IntegerField())),
+        sum_75=Sum(Case(When(sold_date__gte=base_date - timedelta(days=75), then='quantity'), default=0, output_field=IntegerField())),
         sum_90=Sum(Case(When(sold_date__gte=base_date - timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())),
         sum_120=Sum(Case(When(sold_date__gte=base_date - timedelta(days=120), then='quantity'), default=0, output_field=IntegerField())),
         sum_150=Sum(Case(When(sold_date__gte=base_date - timedelta(days=150), then='quantity'), default=0, output_field=IntegerField())),
@@ -346,8 +347,10 @@ def planning_dashboard(request):
     visible_inventories = []
     for item in page_obj:
         pid = item.product.id; pcode = item.product.code
-        sales_data = sales_map_select.get(pid, {'sum_30': 0, 'sum_60': 0, 'sum_90': 0, 'sum_120': 0, 'sum_150': 0, 'sum_180': 0, 'sum_long': 0}) if item.product.demand_source == 'SELECT' else sales_map_ikuji.get(pid, {'sum_30': 0, 'sum_60': 0, 'sum_90': 0, 'sum_120': 0, 'sum_150': 0, 'sum_180': 0, 'sum_long': 0})
-        item.demand_30 = round(sales_data['sum_30'] / 1, 1); item.demand_60 = round(sales_data['sum_60'] / 2, 1)
+        sales_data = sales_map_select.get(pid, {'sum_30': 0, 'sum_45': 0, 'sum_60': 0, 'sum_75': 0, 'sum_90': 0, 'sum_120': 0, 'sum_150': 0, 'sum_180': 0, 'sum_long': 0}) if item.product.demand_source == 'SELECT' else sales_map_ikuji.get(pid, {'sum_30': 0, 'sum_45': 0, 'sum_60': 0, 'sum_75': 0, 'sum_90': 0, 'sum_120': 0, 'sum_150': 0, 'sum_180': 0, 'sum_long': 0})
+        item.demand_30 = round(sales_data['sum_30'], 1)
+        item.mid_days = (item.product.trend_days if item.product.trend_days in [90, 120, 150, 180] else 90) // 2
+        item.demand_mid = round((sales_data.get(f'sum_{item.mid_days}', 0) or 0) * 30 / item.mid_days, 1)
         tdays = item.product.trend_days
         total_long_sales = sales_data['sum_120'] if tdays == 120 else sales_data['sum_150'] if tdays == 150 else sales_data['sum_180'] if tdays == 180 else sales_data['sum_90']
         if tdays not in [120, 150, 180]: tdays = 90
@@ -907,15 +910,33 @@ def bulk_create_order_plan(request):
         messages.warning(request, "商品が選択されていません。")
         return redirect('/?current_company=' + current_company)
     base_date = _get_planning_base_date(current_company); future_end_date = base_date + timedelta(days=120)
-    sales_summary = SalesHistory.objects.filter(sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(sum_30=Sum(Case(When(sold_date__gte=base_date-timedelta(days=30), then='quantity'), default=0, output_field=IntegerField())), sum_long=Sum(Case(When(sold_date__gte=base_date-timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())))
+    products = list(Product.objects.filter(id__in=selected_pids, owner_company=current_company))
+    if not products:
+        messages.warning(request, "選択した商品は現在の会社の発注対象ではありません。")
+        return redirect('/?current_company=' + current_company)
+
+    # 商品ごとの長期ベース日数に合わせて、90〜180日の集計から必要な販売数を選ぶ。
+    sales_summary = SalesHistory.objects.filter(sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(
+        sum_30=Sum(Case(When(sold_date__gte=base_date-timedelta(days=30), then='quantity'), default=0, output_field=IntegerField())),
+        sum_90=Sum(Case(When(sold_date__gte=base_date-timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())),
+        sum_120=Sum(Case(When(sold_date__gte=base_date-timedelta(days=120), then='quantity'), default=0, output_field=IntegerField())),
+        sum_150=Sum(Case(When(sold_date__gte=base_date-timedelta(days=150), then='quantity'), default=0, output_field=IntegerField())),
+        sum_180=Sum(Case(When(sold_date__gte=base_date-timedelta(days=180), then='quantity'), default=0, output_field=IntegerField())),
+    )
+    products_by_id = {product.id: product for product in products}
     s_map_ikuji, s_map_select = {}, {}
     for item in sales_summary:
+        product = products_by_id.get(item['product_id'])
+        if not product:
+            continue
+        trend_days = product.trend_days if product.trend_days in [90, 120, 150, 180] else 90
+        item['sum_long'] = item.get(f'sum_{trend_days}', 0) or 0
         if item['company'] == 'IKUJI': s_map_ikuji[item['product_id']] = item
         else: s_map_select[item['product_id']] = item
     ship_map, arr_map = {}, {}
     for s in ShipmentSchedule.objects.filter(shipment_date__gte=base_date, shipment_date__lte=future_end_date): ship_map.setdefault(s.product_id, {})[s.shipment_date] = ship_map.setdefault(s.product_id, {}).get(s.shipment_date, 0) + s.quantity
     arr_map = _build_arrival_map(ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date))
-    products = Product.objects.filter(id__in=selected_pids); inventories = {inv.product_id: inv for inv in Inventory.objects.filter(product_id__in=selected_pids)}
+    inventories = {inv.product_id: inv for inv in Inventory.objects.filter(product_id__in=products_by_id)}
     success_cnt = 0
     for p in products:
         inv = inventories.get(p.id)

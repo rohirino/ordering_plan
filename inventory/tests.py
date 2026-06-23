@@ -19,6 +19,7 @@ from inventory.models import (
     ProductVariant,
     InventoryState,
     SalesHistory,
+    Order,
     Warehouse,
     WarehouseInventory,
 )
@@ -225,6 +226,54 @@ class ImportProductsCommandTests(TestCase):
         self.assertEqual(sale.product, product)
         self.assertEqual(sale.company, 'IKUJI')
         self.assertIn('共通マスタ利用: 1件', ImportLog.objects.get(dashboard='sales_history').summary)
+
+    def test_bulk_order_uses_each_products_trend_days(self):
+        today = datetime.date.today()
+        product = Product.objects.create(
+            code='1234567', name='120日基準商品', owner_company='IKUJI',
+            demand_source='IKUJI', trend_days=120, lead_time=0, order_lot=1,
+        )
+        Inventory.objects.create(product=product, current_quantity=0, safety_stock=10)
+        SalesHistory.objects.create(
+            product=product, sold_date=today - datetime.timedelta(days=100),
+            quantity=30, customer='C001', sales_category='売上', company='IKUJI',
+        )
+        # 基準日を今日にするため、今日以前の最新販売実績を昨日に置く。
+        SalesHistory.objects.create(
+            product=product, sold_date=today - datetime.timedelta(days=1),
+            quantity=0, customer='C002', sales_category='売上', company='IKUJI',
+        )
+
+        response = self.client.post(
+            reverse('bulk_create_order_plan'),
+            {'current_company': 'IKUJI', 'selected_products': [str(product.id)]},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Order.objects.get(product=product).quantity, 25)
+
+    def test_planning_dashboard_uses_half_of_long_term_days_for_mid_term_display(self):
+        today = datetime.date.today()
+        product = Product.objects.create(
+            code='2345678', name='中期表示商品', owner_company='IKUJI',
+            demand_source='IKUJI', trend_days=150,
+        )
+        Inventory.objects.create(product=product, current_quantity=1)
+        SalesHistory.objects.create(
+            product=product, sold_date=today - datetime.timedelta(days=40),
+            quantity=75, customer='C001', sales_category='売上', company='IKUJI',
+        )
+        SalesHistory.objects.create(
+            product=product, sold_date=today - datetime.timedelta(days=1),
+            quantity=0, customer='C002', sales_category='売上', company='IKUJI',
+        )
+
+        response = self.client.get(reverse('planning_dashboard'), {'current_company': 'IKUJI', 'active_filter': 'all'})
+        body = response.content.decode('utf-8')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('中期<span class="trend-days-pill">75日</span>', body)
+        self.assertIn('>30.0</span>', body)
 
     def test_sales_import_skip_csv_includes_other_reasons(self):
         Product.objects.create(code='6460010', name='登録済商品', owner_company='IKUJI')
@@ -701,6 +750,21 @@ class ImportProductsCommandTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(Inventory.objects.get(product=product).current_quantity, 16)
         self.assertEqual(WarehouseInventory.objects.filter(product=product).count(), 2)
+
+    def test_valuation_upload_rounds_state_cost_to_nearest_yen(self):
+        rows = [
+            ['商品コード', '商品名', '状態名', '状態別評価原価', 'ニチイク在庫'],
+            ['6460010001', 'グリップ シート', '良品', '1000.5', '2'],
+        ]
+        response = self.client.post(
+            reverse('import_valuation_csv'),
+            {'current_company': 'IKUJI', 'inventory_date': '2026-05-31', 'csv_file': SimpleUploadedFile('valuation_cost.csv', self.csv_bytes(rows), content_type='text/csv')},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        snapshot = InventoryValuationSnapshot.objects.get()
+        self.assertEqual(snapshot.unit_cost, 1001)
+        self.assertEqual(snapshot.amount, 2002)
 
     def test_valuation_sync_excludes_variants_marked_not_for_planning_inventory(self):
         rows = [

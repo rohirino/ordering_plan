@@ -287,7 +287,7 @@
                     <th style="padding: 10px; background-color: #fff3cd; text-align: center;" colspan="120">在庫予測推移タイムライン（未来120日間）</th>
                 </tr>
                 <tr>
-                    <th style="padding: 6px; font-size: 12px; background-color: #fafdff; color: #0056b3;">長期 / 60日 / 30日</th>
+                    <th style="padding: 6px; font-size: 12px; background-color: #fafdff; color: #0056b3;">長期 / 中期 / 30日</th>
                     <th style="padding: 6px; font-size: 12px; background-color: #cccccc; text-align: center; font-weight: bold; color: #111;">対応</th>
                     {% for d in date_list %}<th class="timeline-heading" style="padding: 4px; font-size: 10px; text-align: center; background-color: #fff9e6;">{{ d|date:"m/d" }}</th>{% endfor %}
                 </tr>
@@ -357,7 +357,7 @@
                     <td class="metric-stack">
                         <div class="metric-grid">
                             <div class="metric-row" style="background-color: #f2f7ff;"><span class="metric-label">長期<span class="trend-days-pill">{{ item.product.trend_days }}日</span></span><span class="metric-value" style="color: #0056b3;">{{ item.demand_long_display }}</span></div>
-                            <div class="metric-row"><span class="metric-label">60日</span><span class="metric-value" style="color: #666;">{{ item.demand_60 }}</span></div>
+                            <div class="metric-row"><span class="metric-label">中期<span class="trend-days-pill">{{ item.mid_days }}日</span></span><span class="metric-value" style="color: #666;">{{ item.demand_mid }}</span></div>
                             <div class="metric-row"><span class="metric-label">30日</span><span class="metric-value" style="color: #666;">{{ item.demand_30 }}</span></div>
                         </div>
                     </td>

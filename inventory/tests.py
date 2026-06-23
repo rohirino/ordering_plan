@@ -193,12 +193,27 @@ class ImportProductsCommandTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(product.name, '販売履歴からの商品')
 
-    def test_sales_import_skip_csv_includes_missing_products_and_other_reasons(self):
-        Product.objects.create(code='6460010', name='登録済商品', owner_company='IKUJI')
-        Product.objects.create(code='9999999', name='ペットセレクト商品', owner_company='SELECT')
+    def test_sales_upload_uses_shared_master_even_when_owned_by_other_company(self):
+        product = Product.objects.create(code='9999999', name='ペットセレクト商品', owner_company='SELECT')
         rows = [
             ['伝票日付', '得意先コード', '商品コード', '区分', '数量', '税抜金額', '粗利金額'],
             ['2026/06/01', 'C001', '9999999001', '売上', '2', '200', '80'],
+        ]
+        response = self.client.post(
+            reverse('import_sales_csv'),
+            {'current_company': 'IKUJI', 'csv_file': SimpleUploadedFile('sales_shared_product.csv', self.csv_bytes(rows), content_type='text/csv')},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        sale = SalesHistory.objects.get()
+        self.assertEqual(sale.product, product)
+        self.assertEqual(sale.company, 'IKUJI')
+        self.assertIn('共通マスタ利用: 1件', ImportLog.objects.get(dashboard='sales_history').summary)
+
+    def test_sales_import_skip_csv_includes_other_reasons(self):
+        Product.objects.create(code='6460010', name='登録済商品', owner_company='IKUJI')
+        rows = [
+            ['伝票日付', '得意先コード', '商品コード', '区分', '数量', '税抜金額', '粗利金額'],
             ['日付不正', 'C002', '6460010001', '売上', '1', '100', '40'],
             ['2026/06/02', '', '6460010001', '売上', '1', '100', '40'],
         ]
@@ -211,14 +226,9 @@ class ImportProductsCommandTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         import_log = ImportLog.objects.get(dashboard='sales_history', company='IKUJI')
-        self.assertEqual(SalesImportSkip.objects.filter(import_log=import_log).count(), 3)
-        self.assertTrue(SalesImportSkip.objects.filter(import_log=import_log, reason='他社商品マスタ登録済').exists())
+        self.assertEqual(SalesImportSkip.objects.filter(import_log=import_log).count(), 2)
         self.assertTrue(SalesImportSkip.objects.filter(import_log=import_log, reason='伝票日付形式不正').exists())
         self.assertTrue(SalesImportSkip.objects.filter(import_log=import_log, reason='得意先コード未入力').exists())
-
-        missing_product_skip = SalesImportSkip.objects.get(import_log=import_log, reason='他社商品マスタ登録済')
-        self.assertEqual(missing_product_skip.source_product_code, '9999999001')
-        self.assertEqual(missing_product_skip.normalized_product_code, '9999999')
 
         download_response = self.client.get(
             reverse('download_sales_import_skips', args=[import_log.id]),
@@ -228,7 +238,6 @@ class ImportProductsCommandTests(TestCase):
 
         self.assertEqual(download_response.status_code, 200)
         self.assertIn('スキップ理由', downloaded)
-        self.assertIn('他社商品マスタ登録済', downloaded)
         self.assertIn('伝票日付形式不正', downloaded)
         self.assertIn('得意先コード未入力', downloaded)
 

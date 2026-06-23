@@ -1064,7 +1064,7 @@ def import_sales_csv(request):
                 'sales_history',
                 '販売履歴CSV',
                 _status_from_counts(issue_count),
-                f"集計行: {stats['aggregated']}件 / 新規: {stats['created']}件 / 更新: {stats['updated']}件 / 商品自動登録: {stats['auto_created_products']}件 / 他社マスタ登録済スキップ: {stats['other_company_products']}件 / その他スキップ: {stats['skipped']}件",
+                f"集計行: {stats['aggregated']}件 / 新規: {stats['created']}件 / 更新: {stats['updated']}件 / 商品自動登録: {stats['auto_created_products']}件 / 共通マスタ利用: {stats['shared_master_products']}件 / その他スキップ: {stats['skipped']}件",
                 request=request,
                 company=current_company,
                 error_count=issue_count,
@@ -1078,7 +1078,7 @@ def import_sales_csv(request):
                 f"販売履歴の集計更新完了（集計行: {stats['aggregated']}件 / "
                 f"新規: {stats['created']}件 / 更新: {stats['updated']}件 / "
                 f"商品自動登録: {stats['auto_created_products']}件 / "
-                f"他社マスタ登録済スキップ: {stats['other_company_products']}件 / "
+                f"共通マスタ利用: {stats['shared_master_products']}件 / "
                 f"その他スキップ: {stats['skipped']}件）"
             )
         except Exception as e:

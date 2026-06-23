@@ -205,7 +205,7 @@ def import_sales_rows(rows, current_company='IKUJI', dry_run=False):
     aggregated, skipped_rows = aggregate_sales_rows(rows, current_company=current_company)
     product_dict = {
         product.code: product
-        for product in Product.objects.filter(owner_company=current_company)
+        for product in Product.objects.all()
     }
     target_dates = {key[1] for key in aggregated}
 
@@ -218,30 +218,14 @@ def import_sales_rows(rows, current_company='IKUJI', dry_run=False):
     update_list = []
     missing_product_rows = []
     auto_created_products = 0
-    other_company_product_rows = 0
+    shared_master_products = 0
 
     for key, totals in aggregated.items():
         company, sold_date, customer_code, product_code, sales_category = key
         product = product_dict.get(product_code)
+        if product and product.owner_company != current_company:
+            shared_master_products += 1
         if not product:
-            other_company_product = Product.objects.filter(code=product_code).first()
-            if other_company_product:
-                other_company_product_rows += 1
-                missing_product_rows.append({
-                    'source_rows': ', '.join(filter(None, totals['source_rows'])),
-                    'reason': '他社商品マスタ登録済',
-                    'sold_date_text': sold_date.strftime('%Y/%m/%d'),
-                    'customer_code': customer_code,
-                    'source_product_code': ', '.join(dict.fromkeys(filter(None, totals['source_product_codes']))),
-                    'normalized_product_code': product_code,
-                    'product_name': totals['product_name'],
-                    'sales_category': sales_category,
-                    'quantity_text': str(totals['quantity']),
-                    'tax_excluded_amount_text': str(totals['tax_excluded_amount']),
-                    'gross_profit_amount_text': str(totals['gross_profit_amount']),
-                })
-                continue
-
             auto_created_products += 1
             if dry_run:
                 continue
@@ -298,7 +282,7 @@ def import_sales_rows(rows, current_company='IKUJI', dry_run=False):
         'created': len(create_list),
         'updated': len(update_list),
         'auto_created_products': auto_created_products,
-        'other_company_products': other_company_product_rows,
+        'shared_master_products': shared_master_products,
         'missing_products': len(missing_product_rows),
         'skipped': len(skipped_rows),
         'skip_rows': skipped_rows + missing_product_rows,

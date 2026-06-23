@@ -42,6 +42,6 @@ class Command(BaseCommand):
             f"{mode}！ 集計行: {stats['aggregated']}件 / "
             f"新規: {stats['created']}件 / 更新: {stats['updated']}件 / "
             f"商品自動登録: {stats['auto_created_products']}件 / "
-            f"他社マスタ登録済スキップ: {stats['other_company_products']}件 / "
+            f"共通マスタ利用: {stats['shared_master_products']}件 / "
             f"その他スキップ: {stats['skipped']}件"
         ))

@@ -143,6 +143,22 @@ class ImportProductsCommandTests(TestCase):
         return_sale = SalesHistory.objects.get(product__code='6460010', sales_category='返品')
         self.assertEqual(return_sale.quantity, -1)
 
+    def test_sales_upload_parses_japanese_dates_with_or_without_day_spacing(self):
+        Product.objects.create(code='6460010', name='日付商品', owner_company='IKUJI')
+        rows = [
+            ['伝票日付', '得意先コード', '商品コード', '区分', '数量', '税抜金額', '粗利金額'],
+            ['2026年 6月 1日', 'C001', '6460010001', '売上', '1', '100', '40'],
+            ['2026年 6月10日', 'C001', '6460010001', '売上', '2', '200', '80'],
+        ]
+        response = self.client.post(
+            reverse('import_sales_csv'),
+            {'current_company': 'IKUJI', 'csv_file': SimpleUploadedFile('sales_japanese_dates.csv', self.csv_bytes(rows), content_type='text/csv')},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(SalesHistory.objects.count(), 2)
+        self.assertTrue(SalesHistory.objects.filter(sold_date='2026-06-10').exists())
+
     def test_sales_upload_normalizes_eight_digit_source_code_with_missing_leading_zeros(self):
         Product.objects.create(code='0040007', name='先頭ゼロ商品', owner_company='IKUJI')
         rows = [

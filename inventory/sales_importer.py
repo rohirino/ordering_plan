@@ -2,6 +2,7 @@ import csv
 import datetime
 import hashlib
 import io
+import re
 from collections import defaultdict
 from itertools import zip_longest
 
@@ -64,6 +65,13 @@ def parse_date(value):
             return datetime.datetime.strptime(text, fmt).date()
         except ValueError:
             continue
+    japanese_date = re.fullmatch(r'(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日', text)
+    if japanese_date:
+        try:
+            year, month, day = (int(part) for part in japanese_date.groups())
+            return datetime.date(year, month, day)
+        except ValueError:
+            return None
     return None
 
 

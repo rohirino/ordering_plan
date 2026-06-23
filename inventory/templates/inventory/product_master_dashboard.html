@@ -259,7 +259,7 @@
         <table>
             <thead>
                 <tr>
-                    <th>選択</th><th>保存</th><th>商品コード</th><th>商品名</th><th>棚卸由来</th><th>原価</th><th>仕入先</th><th>LT</th><th>ロット</th><th>安全在庫</th><th>長期ベース</th><th>超過ルール</th><th>需要参照元</th><th>管理外</th><th>廃盤</th><th>処分品発注</th><th>削除</th>
+                    <th>選択</th><th>保存</th><th>商品コード</th><th>商品名</th><th>登録由来</th><th>原価</th><th>仕入先</th><th>LT</th><th>ロット</th><th>安全在庫</th><th>長期ベース</th><th>超過ルール</th><th>需要参照元</th><th>管理外</th><th>廃盤</th><th>処分品発注</th><th>削除</th>
                 </tr>
             </thead>
             <tbody>
@@ -277,12 +277,15 @@
                     <td class="source-cell">
                         {% if product.created_from_valuation %}
                             <span class="badge valuation-created">棚卸生成</span>
+                        {% elif product.created_from_sales_history %}
+                            <span class="badge valuation-updated">販売履歴生成</span>
                         {% elif product.last_valuation_synced_at %}
                             <span class="badge valuation-updated">棚卸更新</span>
                         {% else %}
                             <span class="badge manual">通常登録</span>
                         {% endif %}
                         {% if product.last_valuation_name_updated %}<span class="source-note">商品名更新あり</span>{% endif %}
+                        {% if product.first_sales_history_synced_at %}<span class="source-note">生成: {{ product.first_sales_history_synced_at|date:"Y/m/d" }}</span>{% endif %}
                         {% if product.last_valuation_inventory_date %}<span class="source-note">対象: {{ product.last_valuation_inventory_date|date:"Y/m/d" }}</span>{% endif %}
                     </td>
                     <td><input form="productForm{{ product.id }}" type="number" name="price" value="{{ product.price }}" class="num-small"></td>

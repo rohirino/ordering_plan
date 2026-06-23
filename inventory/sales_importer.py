@@ -5,7 +5,9 @@ import io
 from collections import defaultdict
 from itertools import zip_longest
 
-from inventory.models import Product, SalesHistory
+from django.utils import timezone
+
+from inventory.models import Inventory, Product, SalesHistory
 
 
 ENCODINGS = ('cp932', 'utf-8-sig', 'utf-8', 'shift_jis')
@@ -215,25 +217,47 @@ def import_sales_rows(rows, current_company='IKUJI', dry_run=False):
     create_list = []
     update_list = []
     missing_product_rows = []
+    auto_created_products = 0
+    other_company_product_rows = 0
 
     for key, totals in aggregated.items():
         company, sold_date, customer_code, product_code, sales_category = key
         product = product_dict.get(product_code)
         if not product:
-            missing_product_rows.append({
-                'source_rows': ', '.join(filter(None, totals['source_rows'])),
-                'reason': '商品マスタ未登録',
-                'sold_date_text': sold_date.strftime('%Y/%m/%d'),
-                'customer_code': customer_code,
-                'source_product_code': ', '.join(dict.fromkeys(filter(None, totals['source_product_codes']))),
-                'normalized_product_code': product_code,
-                'product_name': totals['product_name'],
-                'sales_category': sales_category,
-                'quantity_text': str(totals['quantity']),
-                'tax_excluded_amount_text': str(totals['tax_excluded_amount']),
-                'gross_profit_amount_text': str(totals['gross_profit_amount']),
-            })
-            continue
+            other_company_product = Product.objects.filter(code=product_code).first()
+            if other_company_product:
+                other_company_product_rows += 1
+                missing_product_rows.append({
+                    'source_rows': ', '.join(filter(None, totals['source_rows'])),
+                    'reason': '他社商品マスタ登録済',
+                    'sold_date_text': sold_date.strftime('%Y/%m/%d'),
+                    'customer_code': customer_code,
+                    'source_product_code': ', '.join(dict.fromkeys(filter(None, totals['source_product_codes']))),
+                    'normalized_product_code': product_code,
+                    'product_name': totals['product_name'],
+                    'sales_category': sales_category,
+                    'quantity_text': str(totals['quantity']),
+                    'tax_excluded_amount_text': str(totals['tax_excluded_amount']),
+                    'gross_profit_amount_text': str(totals['gross_profit_amount']),
+                })
+                continue
+
+            auto_created_products += 1
+            if dry_run:
+                continue
+            product = Product.objects.create(
+                code=product_code,
+                name=totals['product_name'] or '名称未設定',
+                owner_company=current_company,
+                demand_source=current_company,
+                created_from_sales_history=True,
+                first_sales_history_synced_at=timezone.now(),
+            )
+            Inventory.objects.get_or_create(
+                product=product,
+                defaults={'current_quantity': 0, 'safety_stock': 20},
+            )
+            product_dict[product_code] = product
 
         if key in existing_sales:
             sales = existing_sales[key]
@@ -273,6 +297,8 @@ def import_sales_rows(rows, current_company='IKUJI', dry_run=False):
         'aggregated': len(aggregated),
         'created': len(create_list),
         'updated': len(update_list),
+        'auto_created_products': auto_created_products,
+        'other_company_products': other_company_product_rows,
         'missing_products': len(missing_product_rows),
         'skipped': len(skipped_rows),
         'skip_rows': skipped_rows + missing_product_rows,

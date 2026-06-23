@@ -47,6 +47,8 @@ class Product(models.Model):
     abc_rank = models.CharField(verbose_name="ABCランク評価", max_length=10, choices=ABC_RANK_CHOICES, default='C')
     allow_dead_order = models.BooleanField(verbose_name="処分品発注許可フラグ", default=False)
     created_from_valuation = models.BooleanField(verbose_name="棚卸CSVから自動生成", default=False)
+    created_from_sales_history = models.BooleanField(verbose_name="販売履歴CSVから自動生成", default=False)
+    first_sales_history_synced_at = models.DateTimeField(verbose_name="販売履歴CSV初回生成日時", null=True, blank=True)
     last_valuation_synced_at = models.DateTimeField(verbose_name="棚卸CSV最終反映日時", null=True, blank=True)
     last_valuation_inventory_date = models.DateField(verbose_name="棚卸CSV対象棚卸日", null=True, blank=True)
     last_valuation_name_updated = models.BooleanField(verbose_name="棚卸CSVで商品名更新", default=False)

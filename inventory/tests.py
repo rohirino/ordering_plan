@@ -159,8 +159,43 @@ class ImportProductsCommandTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(SalesHistory.objects.get().product.code, '0040007')
 
+    def test_sales_upload_automatically_creates_missing_product_master(self):
+        rows = [
+            ['伝票日付', '得意先コード', '商品コード', '商品名', '区分', '数量', '税抜金額', '粗利金額'],
+            ['2026/06/01', 'C001', '40007001', '販売履歴からの商品', '売上', '2', '200', '80'],
+        ]
+        uploaded = SimpleUploadedFile('sales_new_product.csv', self.csv_bytes(rows), content_type='text/csv')
+
+        response = self.client.post(
+            reverse('import_sales_csv'),
+            {'current_company': 'IKUJI', 'csv_file': uploaded},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        product = Product.objects.get(code='0040007')
+        self.assertEqual(product.name, '販売履歴からの商品')
+        self.assertEqual(product.owner_company, 'IKUJI')
+        self.assertEqual(product.demand_source, 'IKUJI')
+        self.assertTrue(product.created_from_sales_history)
+        self.assertTrue(Inventory.objects.filter(product=product, current_quantity=0, safety_stock=20).exists())
+        self.assertEqual(SalesHistory.objects.get().product, product)
+
+        renamed_rows = [
+            ['伝票日付', '得意先コード', '商品コード', '商品名', '区分', '数量', '税抜金額', '粗利金額'],
+            ['2026/06/02', 'C001', '40007001', '揺れ表記の商品名', '売上', '1', '100', '40'],
+        ]
+        response = self.client.post(
+            reverse('import_sales_csv'),
+            {'current_company': 'IKUJI', 'csv_file': SimpleUploadedFile('sales_name_variation.csv', self.csv_bytes(renamed_rows), content_type='text/csv')},
+        )
+
+        product.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(product.name, '販売履歴からの商品')
+
     def test_sales_import_skip_csv_includes_missing_products_and_other_reasons(self):
         Product.objects.create(code='6460010', name='登録済商品', owner_company='IKUJI')
+        Product.objects.create(code='9999999', name='ペットセレクト商品', owner_company='SELECT')
         rows = [
             ['伝票日付', '得意先コード', '商品コード', '区分', '数量', '税抜金額', '粗利金額'],
             ['2026/06/01', 'C001', '9999999001', '売上', '2', '200', '80'],
@@ -177,11 +212,11 @@ class ImportProductsCommandTests(TestCase):
         self.assertEqual(response.status_code, 302)
         import_log = ImportLog.objects.get(dashboard='sales_history', company='IKUJI')
         self.assertEqual(SalesImportSkip.objects.filter(import_log=import_log).count(), 3)
-        self.assertTrue(SalesImportSkip.objects.filter(import_log=import_log, reason='商品マスタ未登録').exists())
+        self.assertTrue(SalesImportSkip.objects.filter(import_log=import_log, reason='他社商品マスタ登録済').exists())
         self.assertTrue(SalesImportSkip.objects.filter(import_log=import_log, reason='伝票日付形式不正').exists())
         self.assertTrue(SalesImportSkip.objects.filter(import_log=import_log, reason='得意先コード未入力').exists())
 
-        missing_product_skip = SalesImportSkip.objects.get(import_log=import_log, reason='商品マスタ未登録')
+        missing_product_skip = SalesImportSkip.objects.get(import_log=import_log, reason='他社商品マスタ登録済')
         self.assertEqual(missing_product_skip.source_product_code, '9999999001')
         self.assertEqual(missing_product_skip.normalized_product_code, '9999999')
 
@@ -193,7 +228,7 @@ class ImportProductsCommandTests(TestCase):
 
         self.assertEqual(download_response.status_code, 200)
         self.assertIn('スキップ理由', downloaded)
-        self.assertIn('商品マスタ未登録', downloaded)
+        self.assertIn('他社商品マスタ登録済', downloaded)
         self.assertIn('伝票日付形式不正', downloaded)
         self.assertIn('得意先コード未入力', downloaded)
 

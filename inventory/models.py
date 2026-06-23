@@ -38,7 +38,7 @@ class Product(models.Model):
 
     price = models.IntegerField(verbose_name="標準原価", null=True, blank=True, default=0)
     supplier = models.CharField(verbose_name="仕入先", max_length=100, blank=True, null=True)
-    lead_time = models.IntegerField(verbose_name="リードタイム（日数）", default=30)
+    lead_time = models.IntegerField(verbose_name="リードタイム（日数）", default=90)
     order_lot = models.IntegerField(verbose_name="発注ロット", default=1)
     lot_rule = models.CharField(verbose_name="超過時積み上げルール", max_length=20, choices=LOT_RULE_CHOICES, default='ROUND_UP_LOT')
     trend_days = models.IntegerField(verbose_name="長期トレンド計算日数", choices=TREND_DAYS_CHOICES, default=90)
@@ -180,6 +180,7 @@ class SalesHistory(models.Model):
     sales_category = models.CharField(verbose_name="区分", max_length=20, blank=True, default='売上')
     tax_excluded_amount = models.IntegerField(verbose_name="税抜金額", default=0)
     gross_profit_amount = models.IntegerField(verbose_name="粗利金額", default=0)
+    is_advance_order = models.BooleanField(verbose_name="先付け受注（需要計算から除外）", default=False)
     # ★新設：売上データがどちらの会社の実績か
     company = models.CharField(verbose_name="データ所属会社", max_length=20, choices=COMPANY_CHOICES, default='IKUJI')
 
@@ -189,9 +190,10 @@ class SalesHistory(models.Model):
 
 
 class ShipmentSchedule(models.Model):
-    """出荷予定データ"""
+    """先付け受注を含む出荷予定データ"""
     product = models.ForeignKey(Product, on_delete=models.CASCADE, verbose_name="商品")
     shipment_date = models.DateField(verbose_name="出荷予定日")
+    destination = models.CharField(verbose_name="向け先", max_length=100, blank=True, default='')
     quantity = models.IntegerField(verbose_name="出荷予定数量")
 
 

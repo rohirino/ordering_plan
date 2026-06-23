@@ -152,6 +152,7 @@ def _build_arrival_map(queryset):
 def _get_planning_base_date(target_company='IKUJI'):
     latest_sales_date = SalesHistory.objects.filter(
         company=target_company,
+        is_advance_order=False,
         sold_date__lte=datetime.date.today(),
     ).aggregate(latest=Max('sold_date'))['latest']
     if latest_sales_date:
@@ -168,7 +169,8 @@ def _recalculate_abc_ranks(target_company='IKUJI'):
     
     # 2. 期間ごとの売上（90, 120, 150, 180日）をデータベースから一括アノテーション取得（高速化）
     sales_summary = SalesHistory.objects.filter(
-        company=target_company, sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date
+        company=target_company, is_advance_order=False,
+        sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date
     ).values('product_id').annotate(
         sum_90=Sum(Case(When(sold_date__gte=base_date - timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())),
         sum_120=Sum(Case(When(sold_date__gte=base_date - timedelta(days=120), then='quantity'), default=0, output_field=IntegerField())),
@@ -269,7 +271,7 @@ def planning_dashboard(request):
     base_date = _get_planning_base_date(current_company)
     thirty_days_ago = base_date - timedelta(days=30)
     long_check_date = base_date - timedelta(days=months_val * 30)
-    sales_summary = SalesHistory.objects.filter(sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(
+    sales_summary = SalesHistory.objects.filter(is_advance_order=False, sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(
         sum_30=Sum(Case(When(sold_date__gte=thirty_days_ago, then='quantity'), default=0, output_field=IntegerField())),
         sum_45=Sum(Case(When(sold_date__gte=base_date - timedelta(days=45), then='quantity'), default=0, output_field=IntegerField())),
         sum_60=Sum(Case(When(sold_date__gte=base_date - timedelta(days=60), then='quantity'), default=0, output_field=IntegerField())),
@@ -303,11 +305,15 @@ def planning_dashboard(request):
     except PageNotAnInteger: page_obj = paginator.page(1)
     except EmptyPage: page_obj = paginator.page(paginator.num_pages)
     future_end_date = base_date + timedelta(days=120)
-    shipments = ShipmentSchedule.objects.filter(shipment_date__gte=base_date, shipment_date__lte=future_end_date)
-    ship_map = {}
+    shipments = ShipmentSchedule.objects.filter(
+        shipment_date__gte=base_date,
+        shipment_date__lte=future_end_date,
+    ).order_by('shipment_date', 'id')
+    ship_map, shipment_detail_map = {}, {}
     for s in shipments:
         ship_map.setdefault(s.product_id, {}).setdefault(s.shipment_date, 0)
         ship_map[s.product_id][s.shipment_date] += s.quantity
+        shipment_detail_map.setdefault(s.product_id, []).append(s)
     arrivals = ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date)
     arr_map = _build_arrival_map(arrivals)
     date_list = [base_date + timedelta(days=i) for i in range(120)]
@@ -376,6 +382,7 @@ def planning_dashboard(request):
                 if wh.id in shared_wh_ids: item.warehouse_breakdown.append({'name': f"{wh.name}(育)", 'quantity': shared_wh_data.get(wh.id, 0), 'is_transit': wh.is_transit})
         item.current_quantity = sum(product_wh_data.values()) + shared_total
         item.forecast_timeline = []
+        item.future_shipments = shipment_detail_map.get(pid, [])
         running_stock = item.current_quantity; has_shortage_risk, has_order_point_risk = False, False
         product_ships, product_arrivals = ship_map.get(pid, {}), arr_map.get(pid, {})
         first_shortage_date = None
@@ -591,6 +598,21 @@ def sales_history_dashboard(request):
         **_pagination_context(request, page_obj),
     })
 
+@require_POST
+def update_sales_history_advance_order(request, sales_id):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    sale = get_object_or_404(SalesHistory, id=sales_id, company=current_company)
+    sale.is_advance_order = 'is_advance_order' in request.POST
+    sale.save(update_fields=['is_advance_order'])
+    _recalculate_abc_ranks(current_company)
+    messages.success(
+        request,
+        '先付け受注として需要計算から除外しました。' if sale.is_advance_order else '通常販売として需要計算へ戻しました。'
+    )
+    return redirect(request.META.get('HTTP_REFERER', f'/sales-history/?current_company={current_company}'))
+
 def _filter_valuation_variant_rows(variant_rows, params):
     variant_rows = list(variant_rows)
     variant_total_count = len(variant_rows)
@@ -676,7 +698,7 @@ def create_product(request):
             demand_source=request.POST.get('demand_source', current_company),
             price=int(request.POST.get('price') or 0),
             supplier=(request.POST.get('supplier') or '').strip(),
-            lead_time=int(request.POST.get('lead_time') or 30),
+            lead_time=int(request.POST.get('lead_time') or 90),
             order_lot=int(request.POST.get('order_lot') or 1),
             lot_rule=request.POST.get('lot_rule', 'ROUND_UP_LOT'),
             trend_days=int(request.POST.get('trend_days') or 90),
@@ -740,7 +762,7 @@ def update_product_config(request, product_id):
             product.price = int(request.POST.get('price') or 0)
         if 'supplier' in request.POST:
             product.supplier = (request.POST.get('supplier') or '').strip()
-        product.lead_time = int(request.POST.get('lead_time', '30'))
+        product.lead_time = int(request.POST.get('lead_time', '90'))
         product.order_lot = int(request.POST.get('order_lot', '1'))
         product.lot_rule = request.POST.get('lot_rule', 'ROUND_UP_LOT')
         product.trend_days = int(request.POST.get('trend_days', '90'))
@@ -904,10 +926,46 @@ def delete_arrival_schedule(request, arrival_id):
     return redirect(request.META.get('HTTP_REFERER', 'planning_dashboard'))
 
 @require_POST
+def create_shipment_schedule(request, product_id):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    product = get_object_or_404(Product, id=product_id, owner_company=current_company)
+    try:
+        shipment_date = datetime.datetime.strptime(request.POST.get('shipment_date', ''), '%Y-%m-%d').date()
+        destination = (request.POST.get('destination') or '').strip()
+        quantity = int(request.POST.get('quantity') or 0)
+        if not destination:
+            raise ValueError('向け先を入力してください。')
+        if quantity <= 0:
+            raise ValueError('数量は1以上で入力してください。')
+        ShipmentSchedule.objects.create(
+            product=product,
+            shipment_date=shipment_date,
+            destination=destination,
+            quantity=quantity,
+        )
+        messages.success(request, f"商品［{product.code}］の先付け受注を登録しました。")
+    except ValueError as exc:
+        messages.error(request, f"先付け受注の登録エラー: {exc}")
+    return redirect(request.META.get('HTTP_REFERER', f'/?current_company={current_company}'))
+
+@require_POST
+def delete_shipment_schedule(request, shipment_id):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    shipment = get_object_or_404(ShipmentSchedule, id=shipment_id, product__owner_company=current_company)
+    product_code = shipment.product.code
+    shipment.delete()
+    messages.info(request, f"商品［{product_code}］の先付け受注を削除しました。")
+    return redirect(request.META.get('HTTP_REFERER', f'/?current_company={current_company}'))
+
+@require_POST
 def create_order_plan(request, product_id):
     product = get_object_or_404(Product, id=product_id); inventory = Inventory.objects.get(product=product)
     base_date = _get_planning_base_date(product.owner_company); future_end_date = base_date + timedelta(days=120)
-    sales_summary = SalesHistory.objects.filter(sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(sum_30=Sum(Case(When(sold_date__gte=base_date-timedelta(days=30), then='quantity'), default=0, output_field=IntegerField())), sum_long=Sum(Case(When(sold_date__gte=base_date-timedelta(days=product.trend_days), then='quantity'), default=0, output_field=IntegerField())))
+    sales_summary = SalesHistory.objects.filter(is_advance_order=False, sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(sum_30=Sum(Case(When(sold_date__gte=base_date-timedelta(days=30), then='quantity'), default=0, output_field=IntegerField())), sum_long=Sum(Case(When(sold_date__gte=base_date-timedelta(days=product.trend_days), then='quantity'), default=0, output_field=IntegerField())))
     s_map_ikuji, s_map_select = {}, {}
     for item in sales_summary:
         if item['company'] == 'IKUJI': s_map_ikuji[item['product_id']] = item
@@ -931,7 +989,7 @@ def bulk_create_order_plan(request):
         return redirect('/?current_company=' + current_company)
 
     # 商品ごとの長期ベース日数に合わせて、90〜180日の集計から必要な販売数を選ぶ。
-    sales_summary = SalesHistory.objects.filter(sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(
+    sales_summary = SalesHistory.objects.filter(is_advance_order=False, sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(
         sum_30=Sum(Case(When(sold_date__gte=base_date-timedelta(days=30), then='quantity'), default=0, output_field=IntegerField())),
         sum_90=Sum(Case(When(sold_date__gte=base_date-timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())),
         sum_120=Sum(Case(When(sold_date__gte=base_date-timedelta(days=120), then='quantity'), default=0, output_field=IntegerField())),

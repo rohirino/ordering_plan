@@ -161,7 +161,7 @@
             <input type="text" name="name" placeholder="商品名" required style="width: 280px;">
             <input type="number" name="price" placeholder="原価" value="0" class="num-small">
             <input type="text" name="supplier" placeholder="仕入先" class="supplier-input">
-            <input type="number" name="lead_time" value="30" class="num-small" min="0">
+            <input type="number" name="lead_time" value="90" class="num-small" min="0">
             <input type="number" name="order_lot" value="1" class="num-small" min="1">
             <input type="number" name="safety_stock" value="20" class="num-small" min="0">
             <select name="trend_days">{% for value, label in trend_days_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
@@ -178,7 +178,7 @@
             <input type="hidden" name="current_company" value="{{ current_company }}">
             <h2>商品パラメータ一括更新</h2>
             <div class="bulk-grid">
-                <label class="bulk-item"><input type="checkbox" name="bulk_lead_time_enabled">LT<input type="number" name="bulk_lead_time" value="30" min="0"></label>
+                <label class="bulk-item"><input type="checkbox" name="bulk_lead_time_enabled">LT<input type="number" name="bulk_lead_time" value="90" min="0"></label>
                 <label class="bulk-item"><input type="checkbox" name="bulk_order_lot_enabled">ロット<input type="number" name="bulk_order_lot" value="1" min="1"></label>
                 <label class="bulk-item"><input type="checkbox" name="bulk_safety_stock_enabled">安全在庫<input type="number" name="bulk_safety_stock" value="20" min="0"></label>
                 <label class="bulk-item"><input type="checkbox" name="bulk_trend_days_enabled">長期ベース<select name="bulk_trend_days">{% for value, label in trend_days_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>

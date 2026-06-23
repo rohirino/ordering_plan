@@ -49,6 +49,17 @@ class ArrivalScheduleAdmin(admin.ModelAdmin):
     def get_name(self, obj): return obj.product.name
     get_name.short_description = '商品名'
 
+@admin.register(ShipmentSchedule)
+class ShipmentScheduleAdmin(admin.ModelAdmin):
+    list_display = ('shipment_date', 'get_code', 'get_name', 'destination', 'quantity')
+    list_filter = ('shipment_date',)
+    search_fields = ('product__code', 'product__name', 'destination')
+
+    def get_code(self, obj): return obj.product.code
+    get_code.short_description = '商品コード'
+    def get_name(self, obj): return obj.product.name
+    get_name.short_description = '商品名'
+
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = ('created_at', 'get_code', 'get_name', 'quantity', 'status')

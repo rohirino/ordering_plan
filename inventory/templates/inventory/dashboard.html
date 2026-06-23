@@ -71,6 +71,19 @@
         .config-checks { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
         .config-checks label { display: inline-flex; gap: 4px; align-items: center; padding: 2px 6px; border-radius: 4px; background: #fff5f5; color: #e03131; border: 1px dashed #ffc9c9; }
         .config-checks .dead-order-label { background: #f1f0ff; color: #6f42c1; border-color: #c8b6ff; }
+        .shipment-cell { min-width: 180px; background: #fff; vertical-align: top !important; }
+        .shipment-details { position: relative; }
+        .shipment-details > summary { cursor: pointer; color: #8a5a00; font-size: 11px; font-weight: 800; white-space: nowrap; }
+        .shipment-summary { margin-top: 4px; font-size: 10px; line-height: 1.35; color: #495057; }
+        .shipment-panel { display: none; }
+        .shipment-details[open] { z-index: 100; }
+        .shipment-details[open] .shipment-panel { display: block; position: absolute; top: 20px; left: 0; z-index: 1000; width: 300px; padding: 8px; background: #fff; border: 1px solid #d0b27a; border-radius: 5px; box-shadow: 0 8px 18px rgba(0,0,0,0.16); }
+        .shipment-form { display: grid; grid-template-columns: 1fr 1fr 58px auto; gap: 4px; align-items: center; }
+        .shipment-form input { min-width: 0; width: 100%; box-sizing: border-box; font-size: 11px; padding: 3px; border: 1px solid #ced4da; border-radius: 3px; }
+        .shipment-form button, .shipment-remove { padding: 3px 6px; border: 1px solid #b8c2cc; border-radius: 3px; background: #fff; font-size: 10px; font-weight: bold; cursor: pointer; white-space: nowrap; }
+        .shipment-list { margin-top: 7px; border-top: 1px solid #eee; max-height: 130px; overflow: auto; }
+        .shipment-list-row { display: grid; grid-template-columns: 50px 1fr 42px auto; gap: 4px; align-items: center; padding: 3px 0; font-size: 10px; }
+        .shipment-remove { color: #c92a2a; border-color: #ffc9c9; }
         .stock-cell { background-color: #fff; min-width: 155px; line-height: 1.2; }
         .stock-main { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; }
         .stock-quantity { font-size: 14px; font-weight: 800; color: #212529; white-space: nowrap; }
@@ -284,6 +297,7 @@
                     <th style="padding: 10px; min-width: 155px;" rowspan="2">現在庫数(合算) / <br><span style="color:#0056b3;">発注点(理論値)</span></th>
                     <th style="padding: 6px; color: #0056b3; background-color: #e6f0ff; text-align: center; min-width: 128px;">過去実績<br>月換算ベース</th>
                     <th style="padding: 6px; background-color: #ffe6f0; text-align: center; font-size: 13px; font-weight: bold; min-width: 140px;">勢い(トレンド倍率)<br>状況</th>
+                    <th style="padding: 6px; background-color: #fff3cd; text-align: center; font-size: 13px; font-weight: bold; min-width: 180px;" rowspan="2">先付け受注<br><span style="font-size: 10px; font-weight: normal;">日付・向け先・数量</span></th>
                     <th style="padding: 10px; background-color: #fff3cd; text-align: center;" colspan="120">在庫予測推移タイムライン（未来120日間）</th>
                 </tr>
                 <tr>
@@ -398,6 +412,32 @@
                             </div>
 
                         </div>
+                    </td>
+                    <td class="shipment-cell">
+                        <details class="shipment-details">
+                            <summary>先付け受注を登録{% if item.future_shipments %}（{{ item.future_shipments|length }}件）{% endif %}</summary>
+                            <div class="shipment-panel">
+                                <form action="{% url 'create_shipment_schedule' item.product.id %}" method="POST" class="shipment-form">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="current_company" value="{{ current_company }}">
+                                    <input type="date" name="shipment_date" required aria-label="出荷日">
+                                    <input type="text" name="destination" placeholder="向け先" required aria-label="向け先">
+                                    <input type="number" name="quantity" min="1" placeholder="数量" required aria-label="数量">
+                                    <button type="submit">登録</button>
+                                </form>
+                                <div class="shipment-list">
+                                    {% for shipment in item.future_shipments %}
+                                        <div class="shipment-list-row">
+                                            <span>{{ shipment.shipment_date|date:"m/d" }}</span><span title="{{ shipment.destination }}">{{ shipment.destination }}</span><span style="text-align:right;">{{ shipment.quantity }}</span>
+                                            <form action="{% url 'delete_shipment_schedule' shipment.id %}" method="POST" style="margin:0;">{% csrf_token %}<input type="hidden" name="current_company" value="{{ current_company }}"><button type="submit" class="shipment-remove" aria-label="削除">削除</button></form>
+                                        </div>
+                                    {% empty %}<div style="padding-top:5px; font-size:10px; color:#6c757d;">未来120日以内の登録はありません。</div>{% endfor %}
+                                </div>
+                            </div>
+                        </details>
+                        {% if item.future_shipments %}
+                            <div class="shipment-summary">{% for shipment in item.future_shipments|slice:':2' %}{{ shipment.shipment_date|date:"m/d" }} {{ shipment.destination }} {{ shipment.quantity }}個{% if not forloop.last %}<br>{% endif %}{% endfor %}{% if item.future_shipments|length > 2 %}<br>ほか {{ item.future_shipments|length|add:'-2' }}件{% endif %}</div>
+                        {% else %}<div class="shipment-summary">登録なし</div>{% endif %}
                     </td>
                     {% for day in item.forecast_timeline %}<td class="timeline-cell" {% if day.stock <= 0 or day.stock <= item.safety_stock %} style="background-color: #ffcccc; color: Red; font-weight: bold;" {% elif day.stock <= item.order_point %} style="background-color: #fff3cd; color: #b58100; font-weight: bold;" {% endif %}><div>{{ day.stock }}</div><span class="detail-sub">{% if day.ship > 0 %}<span class="ship-text">出:{{ day.ship }}</span>{% endif %}{% if day.arr_kakutei > 0 %}<span class="arr-text">確:{{ day.arr_kakutei }}</span>{% endif %}{% if day.arr_koukaku > 0 %}<span class="arr-ko-text">高:{{ day.arr_koukaku }}</span>{% endif %}{% if day.arr_kibou > 0 %}<span class="arr-ko-text" style="color: #6c757d;">希:{{ day.arr_kibou }}</span>{% endif %}</span></td>{% endfor %}
                 </tr>

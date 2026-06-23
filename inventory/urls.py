@@ -29,12 +29,15 @@ urlpatterns = [
     path('create-arrival-schedule/', views.create_arrival_schedule, name='create_arrival_schedule'),
     path('update-arrival-schedule/<int:arrival_id>/', views.update_arrival_schedule, name='update_arrival_schedule'),
     path('delete-arrival-schedule/<int:arrival_id>/', views.delete_arrival_schedule, name='delete_arrival_schedule'),
+    path('create-shipment-schedule/<int:product_id>/', views.create_shipment_schedule, name='create_shipment_schedule'),
+    path('delete-shipment-schedule/<int:shipment_id>/', views.delete_shipment_schedule, name='delete_shipment_schedule'),
     
     # 各種CSVインポート・エクスポート
     path('import-products/', views.import_products_csv, name='import_products_csv'),
     path('import-inventory/', views.import_inventory_csv, name='import_inventory_csv'),
     path('import-sales/', views.import_sales_csv, name='import_sales_csv'),
     path('sales-import-skips/<int:import_log_id>/', views.download_sales_import_skips, name='download_sales_import_skips'),
+    path('update-sales-history-advance-order/<int:sales_id>/', views.update_sales_history_advance_order, name='update_sales_history_advance_order'),
     path('import-arrivals/', views.import_arrivals_csv, name='import_arrivals_csv'),
     path('import-valuation/', views.import_valuation_csv, name='import_valuation_csv'),
     path('import-inventory-states/', views.import_inventory_state_csv, name='import_inventory_state_csv'),

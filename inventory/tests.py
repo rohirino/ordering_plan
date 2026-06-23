@@ -20,6 +20,7 @@ from inventory.models import (
     InventoryState,
     SalesHistory,
     Order,
+    ShipmentSchedule,
     Warehouse,
     WarehouseInventory,
 )
@@ -193,6 +194,7 @@ class ImportProductsCommandTests(TestCase):
         self.assertEqual(product.name, '販売履歴からの商品')
         self.assertEqual(product.owner_company, 'IKUJI')
         self.assertEqual(product.demand_source, 'IKUJI')
+        self.assertEqual(product.lead_time, 90)
         self.assertTrue(product.created_from_sales_history)
         self.assertTrue(Inventory.objects.filter(product=product, current_quantity=0, safety_stock=20).exists())
         self.assertEqual(SalesHistory.objects.get().product, product)
@@ -274,6 +276,61 @@ class ImportProductsCommandTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('中期<span class="trend-days-pill">75日</span>', body)
         self.assertIn('>30.0</span>', body)
+
+    def test_planning_dashboard_registers_and_displays_advance_shipment(self):
+        today = datetime.date.today()
+        product = Product.objects.create(code='3456789', name='先付け受注商品', owner_company='IKUJI')
+        Inventory.objects.create(product=product, current_quantity=100)
+        SalesHistory.objects.create(
+            product=product, sold_date=today - datetime.timedelta(days=1),
+            quantity=1, customer='C001', sales_category='売上', company='IKUJI',
+        )
+        shipment_date = today + datetime.timedelta(days=10)
+
+        response = self.client.post(
+            reverse('create_shipment_schedule', args=[product.id]),
+            {
+                'current_company': 'IKUJI',
+                'shipment_date': shipment_date.isoformat(),
+                'destination': '得意先A',
+                'quantity': '20',
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        shipment = ShipmentSchedule.objects.get(product=product)
+        self.assertEqual(shipment.destination, '得意先A')
+        self.assertEqual(shipment.quantity, 20)
+        dashboard = self.client.get(reverse('planning_dashboard'), {'current_company': 'IKUJI', 'active_filter': 'all'})
+        self.assertContains(dashboard, '得意先A')
+        self.assertContains(dashboard, '出:20')
+
+        response = self.client.post(
+            reverse('delete_shipment_schedule', args=[shipment.id]),
+            {'current_company': 'IKUJI'},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(ShipmentSchedule.objects.filter(id=shipment.id).exists())
+
+    def test_sales_history_advance_order_is_excluded_from_demand(self):
+        today = datetime.date.today()
+        product = Product.objects.create(code='4567890', name='先付け履歴商品', owner_company='IKUJI')
+        Inventory.objects.create(product=product, current_quantity=10)
+        sale = SalesHistory.objects.create(
+            product=product, sold_date=today - datetime.timedelta(days=1),
+            quantity=50, customer='C001', sales_category='売上', company='IKUJI',
+        )
+
+        response = self.client.post(
+            reverse('update_sales_history_advance_order', args=[sale.id]),
+            {'current_company': 'IKUJI', 'is_advance_order': 'on'},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        sale.refresh_from_db()
+        self.assertTrue(sale.is_advance_order)
+        dashboard = self.client.get(reverse('planning_dashboard'), {'current_company': 'IKUJI', 'active_filter': 'active'})
+        self.assertNotContains(dashboard, product.code)
 
     def test_sales_import_skip_csv_includes_other_reasons(self):
         Product.objects.create(code='6460010', name='登録済商品', owner_company='IKUJI')

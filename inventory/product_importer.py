@@ -112,7 +112,7 @@ def build_product_data(row, seen_codes, current_company='IKUJI'):
         'name': name,
         'price': normalize_price(get_row_value(row, '標準原価', '固定原価')),
         'supplier': get_row_value(row, '仕入先名【仕入先マスタ 一覧】', '仕入先') or '仕入先未設定',
-        'lead_time': normalize_int(get_row_value(row, 'リードタイム'), 30),
+        'lead_time': normalize_int(get_row_value(row, 'リードタイム'), 90),
         'order_lot': normalize_int(get_row_value(row, '発注ロット'), 1),
         'lot_rule': rule,
         'trend_days': normalize_int(get_row_value(row, '長期トレンド日数'), 90),

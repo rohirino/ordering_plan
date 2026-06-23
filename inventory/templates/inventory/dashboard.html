@@ -263,6 +263,8 @@
 
             <div style="text-align: right; margin-bottom: 4px;">
                 <button type="button" onclick="printOrderPlanSheet()" style="background-color: #495057; color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;">🖨️ この一覧をA4印刷（アクションボタン除外）</button>
+                <a href="{% url 'export_order_plans_csv' %}?current_company={{ current_company }}" style="display:inline-block; margin-left:4px; padding:2px 8px; border:1px solid #adb5bd; border-radius:4px; background:#fff; color:#212529; text-decoration:none; font-size:11px; font-weight:bold;">CSV出力</a>
+                <a href="{% url 'export_order_plans_excel' %}?current_company={{ current_company }}" style="display:inline-block; margin-left:4px; padding:2px 8px; border:1px solid #217346; border-radius:4px; background:#217346; color:#fff; text-decoration:none; font-size:11px; font-weight:bold;">Excel出力</a>
             </div>
 
             <table class="order-table">

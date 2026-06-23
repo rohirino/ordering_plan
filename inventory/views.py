@@ -2,6 +2,7 @@ import datetime
 import math
 import io
 import csv
+import html
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 from django.contrib import messages
@@ -1406,6 +1407,68 @@ def export_arrivals_csv(request):
     buf = io.StringIO(); writer = csv.writer(buf); writer.writerow(['商品コード', '商品名', '入荷予定日', '入荷予定数量', '確度ステータス'])
     for a in ArrivalSchedule.objects.select_related('product').filter(product__owner_company=cc): writer.writerow([a.product.code, a.product.name, a.arrival_date.strftime('%Y/%m/%d'), a.quantity, a.status])
     res.write(buf.getvalue().encode('cp932', errors='replace')); return res
+
+def _order_plan_export_rows(current_company):
+    return Order.objects.select_related('product').filter(
+        product__owner_company=current_company,
+    ).order_by('order_date', 'created_at', 'product__code')
+
+def export_order_plans_csv(request):
+    current_company = request.GET.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="order_plans_{current_company}.csv"'
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(['作成日時', '発注予定日', '入荷予定日', '商品コード', '商品名', '仕入先', '発注数量', '発注ロット', '発注間隔日数', 'ステータス'])
+    for order in _order_plan_export_rows(current_company):
+        writer.writerow([
+            order.created_at.strftime('%Y/%m/%d %H:%M'),
+            order.order_date.strftime('%Y/%m/%d') if order.order_date else '',
+            order.expected_arrival_date.strftime('%Y/%m/%d') if order.expected_arrival_date else '',
+            order.product.code,
+            order.product.name,
+            order.product.supplier or '',
+            order.quantity,
+            order.product.order_lot,
+            order.product.order_interval_days,
+            order.status,
+        ])
+    response.write(buffer.getvalue().encode('cp932', errors='replace'))
+    return response
+
+def export_order_plans_excel(request):
+    current_company = request.GET.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    company_name = dict(Product.COMPANY_CHOICES)[current_company]
+    rows = [
+        '<html><head><meta charset="utf-8"></head><body>',
+        f'<h2>発注計画一覧 - {html.escape(company_name)}</h2>',
+        f'<p>出力日: {datetime.date.today():%Y/%m/%d}</p>',
+        '<table border="1"><tr><th>作成日時</th><th>発注予定日</th><th>入荷予定日</th><th>商品コード</th><th>商品名</th><th>仕入先</th><th>発注数量</th><th>発注ロット</th><th>発注間隔日数</th><th>ステータス</th></tr>',
+    ]
+    for order in _order_plan_export_rows(current_company):
+        order_date = order.order_date.strftime('%Y/%m/%d') if order.order_date else ''
+        arrival_date = order.expected_arrival_date.strftime('%Y/%m/%d') if order.expected_arrival_date else ''
+        rows.append(
+            '<tr>'
+            f'<td>{order.created_at:%Y/%m/%d %H:%M}</td>'
+            f'<td>{order_date}</td>'
+            f'<td>{arrival_date}</td>'
+            f'<td>{html.escape(order.product.code)}</td>'
+            f'<td>{html.escape(order.product.name)}</td>'
+            f'<td>{html.escape(order.product.supplier or "")}</td>'
+            f'<td style="text-align:right">{order.quantity}</td>'
+            f'<td style="text-align:right">{order.product.order_lot}</td>'
+            f'<td style="text-align:right">{order.product.order_interval_days}</td>'
+            f'<td>{html.escape(order.status)}</td></tr>'
+        )
+    rows.append('</table></body></html>')
+    response = HttpResponse('\n'.join(rows).encode('utf-8'), content_type='application/vnd.ms-excel; charset=utf-8')
+    response['Content-Disposition'] = f'attachment; filename="order_plans_{current_company}.xls"'
+    return response
 
 def export_inventory_states_csv(request):
     res = HttpResponse(content_type='text/csv')

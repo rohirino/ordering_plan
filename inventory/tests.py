@@ -279,6 +279,26 @@ class ImportProductsCommandTests(TestCase):
         dashboard = self.client.get(reverse('planning_dashboard'), {'current_company': 'IKUJI', 'active_filter': 'all'})
         self.assertContains(dashboard, '計:')
 
+    def test_order_plan_exports_csv_and_excel(self):
+        product = Product.objects.create(code='5678901', name='発注出力商品', owner_company='IKUJI', supplier='仕入先A')
+        Order.objects.create(
+            product=product,
+            quantity=120,
+            order_date='2026-06-24',
+            expected_arrival_date='2026-09-22',
+            status='計画中',
+        )
+
+        csv_response = self.client.get(reverse('export_order_plans_csv'), {'current_company': 'IKUJI'})
+        excel_response = self.client.get(reverse('export_order_plans_excel'), {'current_company': 'IKUJI'})
+
+        self.assertEqual(csv_response.status_code, 200)
+        self.assertIn('発注予定日', csv_response.content.decode('cp932'))
+        self.assertIn('発注出力商品', csv_response.content.decode('cp932'))
+        self.assertEqual(excel_response.status_code, 200)
+        self.assertIn('application/vnd.ms-excel', excel_response['Content-Type'])
+        self.assertIn('発注出力商品', excel_response.content.decode('utf-8'))
+
     def test_planning_dashboard_uses_half_of_long_term_days_for_mid_term_display(self):
         today = datetime.date.today()
         product = Product.objects.create(

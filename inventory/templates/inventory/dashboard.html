@@ -297,7 +297,7 @@
                     <th style="padding: 10px; min-width: 155px;" rowspan="2">現在庫数(合算) / <br><span style="color:#0056b3;">発注点(理論値)</span></th>
                     <th style="padding: 6px; color: #0056b3; background-color: #e6f0ff; text-align: center; min-width: 128px;">過去実績<br>月換算ベース</th>
                     <th style="padding: 6px; background-color: #ffe6f0; text-align: center; font-size: 13px; font-weight: bold; min-width: 140px;">勢い(トレンド倍率)<br>状況</th>
-                    <th style="padding: 6px; background-color: #fff3cd; text-align: center; font-size: 13px; font-weight: bold; min-width: 180px;" rowspan="2">先付け受注<br><span style="font-size: 10px; font-weight: normal;">日付・向け先・数量</span></th>
+                    <th style="padding: 6px; background-color: #fff3cd; text-align: center; font-size: 13px; font-weight: bold; min-width: 180px;" rowspan="2">先付け受注<br><span style="font-size: 10px; font-weight: normal;">イレギュラーな大口のみ</span></th>
                     <th style="padding: 10px; background-color: #fff3cd; text-align: center;" colspan="120">在庫予測推移タイムライン（未来120日間）</th>
                 </tr>
                 <tr>
@@ -417,6 +417,7 @@
                         <details class="shipment-details">
                             <summary>先付け受注を登録{% if item.future_shipments %}（{{ item.future_shipments|length }}件）{% endif %}</summary>
                             <div class="shipment-panel">
+                                <div style="margin-bottom:6px; font-size:10px; color:#6c757d;">定期的な大口受注は登録せず、通常の需要トレンドで管理します。</div>
                                 <form action="{% url 'create_shipment_schedule' item.product.id %}" method="POST" class="shipment-form">
                                     {% csrf_token %}
                                     <input type="hidden" name="current_company" value="{{ current_company }}">

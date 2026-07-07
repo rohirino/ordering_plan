@@ -1601,21 +1601,52 @@ def product_sales_chart_data(request, product_id):
     max_days = 730
     if (end_date - start_date).days > max_days:
         start_date = end_date - timedelta(days=max_days)
+    long_window = product.trend_days if product.trend_days in [90, 120, 150, 180] else 90
+    mid_window = max(1, long_window // 2)
+    short_window = 30
+    max_window = max(long_window, mid_window, short_window)
+    query_start = start_date - timedelta(days=max_window - 1)
 
     rows = SalesHistory.objects.filter(
         product=product,
         company=current_company,
         is_advance_order=False,
-        sold_date__gte=start_date,
+        sold_date__gte=query_start,
         sold_date__lte=end_date,
     ).values('sold_date').annotate(quantity=Sum('quantity')).order_by('sold_date')
     quantity_by_date = {row['sold_date']: row['quantity'] or 0 for row in rows}
-    labels, quantities = [], []
+    all_dates, all_quantities = [], []
+    day = query_start
+    while day <= end_date:
+        all_dates.append(day)
+        all_quantities.append(quantity_by_date.get(day, 0))
+        day += timedelta(days=1)
+
+    def moving_average(window):
+        values = []
+        running = 0
+        queue = []
+        for qty in all_quantities:
+            queue.append(qty)
+            running += qty
+            if len(queue) > window:
+                running -= queue.pop(0)
+            values.append(round(running / len(queue), 2))
+        return values
+
+    ma_long_all = moving_average(long_window)
+    ma_mid_all = moving_average(mid_window)
+    ma_short_all = moving_average(short_window)
+    display_start_index = (start_date - query_start).days
+    labels = []
+    quantities = []
     day = start_date
+    idx = display_start_index
     while day <= end_date:
         labels.append(day.strftime('%Y/%m/%d'))
         quantities.append(quantity_by_date.get(day, 0))
         day += timedelta(days=1)
+        idx += 1
     return JsonResponse({
         'product_code': product.code,
         'product_name': product.name,
@@ -1623,6 +1654,12 @@ def product_sales_chart_data(request, product_id):
         'end_date': end_date.strftime('%Y-%m-%d'),
         'labels': labels,
         'quantities': quantities,
+        'ma_long': ma_long_all[display_start_index:],
+        'ma_mid': ma_mid_all[display_start_index:],
+        'ma_short': ma_short_all[display_start_index:],
+        'long_window': long_window,
+        'mid_window': mid_window,
+        'short_window': short_window,
         'total_quantity': sum(quantities),
     })
 

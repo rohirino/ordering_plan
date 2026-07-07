@@ -599,6 +599,35 @@
                                 pointRadius: 1,
                                 tension: 0.15,
                                 fill: true
+                            }, {
+                                label: `長期移動平均（${data.long_window}日）`,
+                                data: data.ma_long,
+                                borderColor: '#1864ab',
+                                backgroundColor: 'rgba(24, 100, 171, 0)',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                tension: 0.2,
+                                fill: false
+                            }, {
+                                label: `中期移動平均（${data.mid_window}日）`,
+                                data: data.ma_mid,
+                                borderColor: '#f08c00',
+                                backgroundColor: 'rgba(240, 140, 0, 0)',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                borderDash: [6, 4],
+                                tension: 0.2,
+                                fill: false
+                            }, {
+                                label: `短期移動平均（${data.short_window}日）`,
+                                data: data.ma_short,
+                                borderColor: '#c92a2a',
+                                backgroundColor: 'rgba(201, 42, 42, 0)',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                borderDash: [2, 3],
+                                tension: 0.2,
+                                fill: false
                             }]
                         },
                         options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, title: { display: true, text: '販売数 (個)' } }, x: { title: { display: true, text: '日付' }, ticks: { maxTicksLimit: 18 } } } }

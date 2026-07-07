@@ -29,15 +29,15 @@
             <a class="btn" href="{% url 'sales_history_dashboard' %}?current_company={{ current_company }}">日次販売履歴</a>
             <a class="btn" href="{% url 'arrivals_dashboard' %}?current_company={{ current_company }}">入荷予定・発注残</a>
             <a class="btn" href="{% url 'valuation_dashboard' %}?current_company={{ current_company }}">棚卸資産評価</a>
-            <a class="btn" href="{% url 'operation_guide' %}?current_company={{ current_company }}">画面説明・運用ガイド</a>
+            <a class="btn" href="{% url 'system_guide' %}?current_company={{ current_company }}">画面説明・運用ガイド</a>
             <a class="btn" href="/admin/" target="_blank">Django管理画面</a>
         </div>
 
         <h1>このアプリについて</h1>
-        <p class="note">販売履歴、棚卸在庫、入荷予定、商品別の発注パラメータをつなげて、欠品予測と発注判断を支援する社内向けアプリです。CSV登録や個別登録は、用途別のDashboardから行います。</p>
+        <p class="note">販売履歴、全倉庫実在庫、入荷予定、商品別の発注パラメータをつなげて、欠品予測と発注判断を支援する社内向けアプリです。CSV登録や個別登録は、用途別のDashboardから行います。</p>
 
         <div class="summary">
-            このアプリは、過去の販売実績から需要の勢いを見積もり、棚卸確定在庫を起点に未来120日間の在庫推移を確認するためのものです。あわせて、棚卸資産評価では状態コード別の原価・数量・在庫金額を管理し、販売在庫に含める状態だけを発注計画へ反映できます。
+            このアプリは、過去の販売実績から需要の勢いを見積もり、任意日に登録した全倉庫実在庫を起点に未来120日間の在庫推移を確認するためのものです。あわせて、棚卸資産評価では状態コード別の原価・数量・在庫金額を管理できます。
         </div>
 
         <h2>画面の役割</h2>

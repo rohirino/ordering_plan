@@ -69,6 +69,7 @@ def _parse_inventory_quantity(value):
 def _normalize_product_code(raw_code):
     return _normalize_inventory_product_code(raw_code)
 
+
 def _parse_csv_quantity(value):
     return _parse_inventory_quantity(value)
 
@@ -158,20 +159,48 @@ def _build_order_arrival_map(queryset):
             order_map[order.product_id][order.expected_arrival_date] += order.quantity
     return order_map
 
-def _get_planning_base_date(target_company='IKUJI'):
+def _get_latest_stock_base_date(target_company='IKUJI'):
+    latest_actual_date = Inventory.objects.filter(
+        product__owner_company=target_company,
+        stock_source='ACTUAL',
+        inventory_date__isnull=False,
+    ).aggregate(latest=Max('inventory_date'))['latest']
+    if latest_actual_date:
+        return latest_actual_date
+    return Inventory.objects.filter(
+        product__owner_company=target_company,
+        inventory_date__isnull=False,
+    ).aggregate(latest=Max('inventory_date'))['latest']
+
+def _parse_stock_base_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.datetime.strptime(value, '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        return None
+
+def _get_stock_base_date(target_company='IKUJI', requested_date=None):
+    return requested_date or _get_latest_stock_base_date(target_company)
+
+def _get_planning_base_date(target_company='IKUJI', stock_base_date=None):
+    if stock_base_date:
+        # Registered stock is treated as the closing stock for that day.
+        return stock_base_date + timedelta(days=1)
     latest_sales_date = SalesHistory.objects.filter(
         company=target_company,
         is_advance_order=False,
         sold_date__lte=datetime.date.today(),
     ).aggregate(latest=Max('sold_date'))['latest']
     if latest_sales_date:
-        # Start forecasting after the last actual sales day, not after the stocktake date.
         return latest_sales_date + timedelta(days=1)
     return datetime.date.today()
 
-def _recalculate_abc_ranks(target_company='IKUJI'):
+def _recalculate_abc_ranks(target_company='IKUJI', base_date=None, sales_cutoff_date=None):
     """【現実的改修】各商品の個別設定「長期トレンド日数」に100%自動連動してABCを評価する"""
-    base_date = _get_planning_base_date(target_company)
+    stock_base_date = _get_stock_base_date(target_company)
+    base_date = base_date or _get_planning_base_date(target_company, stock_base_date)
+    sales_cutoff_date = sales_cutoff_date or stock_base_date or base_date
     
     # 1. 会社に所属する全マスタをロード
     products = Product.objects.filter(owner_company=target_company, is_discontinued=False)
@@ -179,12 +208,12 @@ def _recalculate_abc_ranks(target_company='IKUJI'):
     # 2. 期間ごとの売上（90, 120, 150, 180日）をデータベースから一括アノテーション取得（高速化）
     sales_summary = SalesHistory.objects.filter(
         company=target_company, is_advance_order=False,
-        sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date
+        sold_date__gte=sales_cutoff_date - timedelta(days=180), sold_date__lte=sales_cutoff_date
     ).values('product_id').annotate(
-        sum_90=Sum(Case(When(sold_date__gte=base_date - timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())),
-        sum_120=Sum(Case(When(sold_date__gte=base_date - timedelta(days=120), then='quantity'), default=0, output_field=IntegerField())),
-        sum_150=Sum(Case(When(sold_date__gte=base_date - timedelta(days=150), then='quantity'), default=0, output_field=IntegerField())),
-        sum_180=Sum(Case(When(sold_date__gte=base_date - timedelta(days=180), then='quantity'), default=0, output_field=IntegerField())),
+        sum_90=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())),
+        sum_120=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=120), then='quantity'), default=0, output_field=IntegerField())),
+        sum_150=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=150), then='quantity'), default=0, output_field=IntegerField())),
+        sum_180=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=180), then='quantity'), default=0, output_field=IntegerField())),
     )
     sales_map = {item['product_id']: item for item in sales_summary}
     
@@ -308,7 +337,11 @@ def planning_dashboard(request):
     current_company = request.GET.get('current_company', 'IKUJI')
     if current_company not in ['IKUJI', 'SELECT']: current_company = 'IKUJI'
     if current_company == 'SELECT': Product.objects.filter(owner_company='SELECT', demand_source='IKUJI').update(demand_source='SELECT')
-    _recalculate_abc_ranks(current_company)
+    requested_stock_base_date = _parse_stock_base_date(request.GET.get('stock_base_date'))
+    stock_base_date = _get_stock_base_date(current_company, requested_stock_base_date)
+    base_date = _get_planning_base_date(current_company, stock_base_date)
+    sales_cutoff_date = stock_base_date or base_date
+    _recalculate_abc_ranks(current_company, base_date=base_date, sales_cutoff_date=sales_cutoff_date)
     ikuji_warehouses = Warehouse.objects.filter(owner_company='IKUJI', is_active=True)
     shared_wh_ids = [int(x) for x in request.GET.getlist('shared_whs') if x.isdigit()]
     active_filter = request.GET.get('active_filter', 'active')
@@ -320,18 +353,17 @@ def planning_dashboard(request):
     abc_filter = request.GET.get('abc_filter', '').strip()
     supplier_code = request.GET.get('supplier_code', '').strip()
     show_discontinued = request.GET.get('show_discontinued') == '1'
-    base_date = _get_planning_base_date(current_company)
-    thirty_days_ago = base_date - timedelta(days=30)
-    long_check_date = base_date - timedelta(days=months_val * 30)
-    sales_summary = SalesHistory.objects.filter(is_advance_order=False, sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(
+    thirty_days_ago = sales_cutoff_date - timedelta(days=30)
+    long_check_date = sales_cutoff_date - timedelta(days=months_val * 30)
+    sales_summary = SalesHistory.objects.filter(is_advance_order=False, sold_date__gte=sales_cutoff_date - timedelta(days=180), sold_date__lte=sales_cutoff_date).values('product_id', 'company').annotate(
         sum_30=Sum(Case(When(sold_date__gte=thirty_days_ago, then='quantity'), default=0, output_field=IntegerField())),
-        sum_45=Sum(Case(When(sold_date__gte=base_date - timedelta(days=45), then='quantity'), default=0, output_field=IntegerField())),
-        sum_60=Sum(Case(When(sold_date__gte=base_date - timedelta(days=60), then='quantity'), default=0, output_field=IntegerField())),
-        sum_75=Sum(Case(When(sold_date__gte=base_date - timedelta(days=75), then='quantity'), default=0, output_field=IntegerField())),
-        sum_90=Sum(Case(When(sold_date__gte=base_date - timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())),
-        sum_120=Sum(Case(When(sold_date__gte=base_date - timedelta(days=120), then='quantity'), default=0, output_field=IntegerField())),
-        sum_150=Sum(Case(When(sold_date__gte=base_date - timedelta(days=150), then='quantity'), default=0, output_field=IntegerField())),
-        sum_180=Sum(Case(When(sold_date__gte=base_date - timedelta(days=180), then='quantity'), default=0, output_field=IntegerField())),
+        sum_45=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=45), then='quantity'), default=0, output_field=IntegerField())),
+        sum_60=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=60), then='quantity'), default=0, output_field=IntegerField())),
+        sum_75=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=75), then='quantity'), default=0, output_field=IntegerField())),
+        sum_90=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())),
+        sum_120=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=120), then='quantity'), default=0, output_field=IntegerField())),
+        sum_150=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=150), then='quantity'), default=0, output_field=IntegerField())),
+        sum_180=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=180), then='quantity'), default=0, output_field=IntegerField())),
         sum_long=Sum(Case(When(sold_date__gte=long_check_date, then='quantity'), default=0, output_field=IntegerField()))
     )
     sales_map_ikuji, sales_map_select = {}, {}
@@ -466,6 +498,9 @@ def planning_dashboard(request):
         'inventory_date_choices': inventory_date_choices, 'active_orders': active_orders,
         'abc_filter': abc_filter, 'supplier_code': supplier_code,
         'show_discontinued': show_discontinued, 'current_company': current_company,
+        'stock_base_date': stock_base_date, 'base_date': base_date,
+        'stock_base_date_param': stock_base_date.strftime('%Y-%m-%d') if stock_base_date else '',
+        'today': datetime.date.today(),
         'active_filter': active_filter, 'all_warehouses': all_warehouses,
         'ikuji_warehouses': ikuji_warehouses, 'shared_wh_ids': shared_wh_ids,
         'kpi_shortage_cnt': kpi_shortage_cnt, 'kpi_order_point_cnt': kpi_order_point_cnt,
@@ -1028,8 +1063,10 @@ def delete_shipment_schedule(request, shipment_id):
 @require_POST
 def create_order_plan(request, product_id):
     product = get_object_or_404(Product, id=product_id); inventory = Inventory.objects.get(product=product)
-    base_date = _get_planning_base_date(product.owner_company); future_end_date = base_date + timedelta(days=120)
-    sales_summary = SalesHistory.objects.filter(is_advance_order=False, sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(sum_30=Sum(Case(When(sold_date__gte=base_date-timedelta(days=30), then='quantity'), default=0, output_field=IntegerField())), sum_long=Sum(Case(When(sold_date__gte=base_date-timedelta(days=product.trend_days), then='quantity'), default=0, output_field=IntegerField())))
+    stock_base_date = _get_stock_base_date(product.owner_company, _parse_stock_base_date(request.POST.get('stock_base_date')))
+    base_date = _get_planning_base_date(product.owner_company, stock_base_date); future_end_date = base_date + timedelta(days=120)
+    sales_cutoff_date = stock_base_date or base_date
+    sales_summary = SalesHistory.objects.filter(is_advance_order=False, sold_date__gte=sales_cutoff_date - timedelta(days=180), sold_date__lte=sales_cutoff_date).values('product_id', 'company').annotate(sum_30=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=30), then='quantity'), default=0, output_field=IntegerField())), sum_long=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=product.trend_days), then='quantity'), default=0, output_field=IntegerField())))
     s_map_ikuji, s_map_select = {}, {}
     for item in sales_summary:
         if item['company'] == 'IKUJI': s_map_ikuji[item['product_id']] = item
@@ -1048,19 +1085,21 @@ def bulk_create_order_plan(request):
     if not selected_pids:
         messages.warning(request, "商品が選択されていません。")
         return redirect('/?current_company=' + current_company)
-    base_date = _get_planning_base_date(current_company); future_end_date = base_date + timedelta(days=120)
+    stock_base_date = _get_stock_base_date(current_company, _parse_stock_base_date(request.POST.get('stock_base_date')))
+    base_date = _get_planning_base_date(current_company, stock_base_date); future_end_date = base_date + timedelta(days=120)
+    sales_cutoff_date = stock_base_date or base_date
     products = list(Product.objects.filter(id__in=selected_pids, owner_company=current_company))
     if not products:
         messages.warning(request, "選択した商品は現在の会社の発注対象ではありません。")
         return redirect('/?current_company=' + current_company)
 
     # 商品ごとの長期ベース日数に合わせて、90〜180日の集計から必要な販売数を選ぶ。
-    sales_summary = SalesHistory.objects.filter(is_advance_order=False, sold_date__gte=base_date - timedelta(days=180), sold_date__lte=base_date).values('product_id', 'company').annotate(
-        sum_30=Sum(Case(When(sold_date__gte=base_date-timedelta(days=30), then='quantity'), default=0, output_field=IntegerField())),
-        sum_90=Sum(Case(When(sold_date__gte=base_date-timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())),
-        sum_120=Sum(Case(When(sold_date__gte=base_date-timedelta(days=120), then='quantity'), default=0, output_field=IntegerField())),
-        sum_150=Sum(Case(When(sold_date__gte=base_date-timedelta(days=150), then='quantity'), default=0, output_field=IntegerField())),
-        sum_180=Sum(Case(When(sold_date__gte=base_date-timedelta(days=180), then='quantity'), default=0, output_field=IntegerField())),
+    sales_summary = SalesHistory.objects.filter(is_advance_order=False, sold_date__gte=sales_cutoff_date - timedelta(days=180), sold_date__lte=sales_cutoff_date).values('product_id', 'company').annotate(
+        sum_30=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=30), then='quantity'), default=0, output_field=IntegerField())),
+        sum_90=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())),
+        sum_120=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=120), then='quantity'), default=0, output_field=IntegerField())),
+        sum_150=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=150), then='quantity'), default=0, output_field=IntegerField())),
+        sum_180=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=180), then='quantity'), default=0, output_field=IntegerField())),
     )
     products_by_id = {product.id: product for product in products}
     s_map_ikuji, s_map_select = {}, {}
@@ -1146,14 +1185,14 @@ def import_inventory_csv(request):
                             error_samples.append(f"数量エラー: 商品{code} / {w_name} / 値={row.get(w_name, '')}")
                     WarehouseInventory.objects.create(product=p_obj, warehouse=w_obj, quantity=qty)
                     tot += qty
-                Inventory.objects.update_or_create(product=p_obj, defaults={'current_quantity': tot, 'inventory_date': selected_date})
+                Inventory.objects.update_or_create(product=p_obj, defaults={'current_quantity': tot, 'inventory_date': selected_date, 'stock_source': 'ACTUAL'})
                 row_count += 1
             _recalculate_abc_ranks(current_company)
             unchanged_count = max(len(products) - len(seen_codes), 0)
             issue_count = unknown_count + quantity_error_count
             _log_import(
                 'planning',
-                '在庫CSV',
+                '実在庫CSV',
                 _status_from_counts(issue_count),
                 f"更新: {row_count}件 / 未更新: {unchanged_count}件 / 商品未登録: {unknown_count}件 / 数量エラー: {quantity_error_count}件",
                 request=request,
@@ -1163,11 +1202,11 @@ def import_inventory_csv(request):
             )
             messages.success(
                 request,
-                f"実在庫を商品単位で洗替し再評価しました！ "
+                f"{selected_date:%Y/%m/%d}時点の全倉庫実在庫を商品単位で洗替し再評価しました！ "
                 f"(更新: {row_count}件 / 未更新: {unchanged_count}件 / 商品未登録: {unknown_count}件 / 数量エラー: {quantity_error_count}件)"
             )
         except Exception as e:
-            _log_import('planning', '在庫CSV', 'error', f"取込失敗: {e}", request=request, company=current_company, error_count=1)
+            _log_import('planning', '実在庫CSV', 'error', f"取込失敗: {e}", request=request, company=current_company, error_count=1)
             messages.error(request, f"エラー: {e}")
     return redirect('/?current_company=' + current_company)
 
@@ -1552,7 +1591,8 @@ def sync_valuation_to_planning(request):
     messages.success(
         request,
         f"棚卸資産評価から発注計画へ在庫数量を反映しました。商品: {stats['products']}件 / "
-        f"倉庫別: {stats['warehouse_rows']}件 / 発注計画除外明細: {stats['excluded_snapshots']}件"
+        f"倉庫別: {stats['warehouse_rows']}件 / 発注計画除外明細: {stats['excluded_snapshots']}件 / "
+        f"実在庫優先スキップ: {stats.get('skipped_by_actual_stock', 0)}件"
     )
     return redirect(f'/valuation/?current_company={current_company}&inventory_date={inventory_date:%Y-%m-%d}')
 

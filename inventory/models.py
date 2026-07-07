@@ -86,10 +86,16 @@ class Warehouse(models.Model):
 
 class Inventory(models.Model):
     """現在庫データ"""
+    STOCK_SOURCE_CHOICES = (
+        ('ACTUAL', '実在庫CSV'),
+        ('VALUATION', '棚卸資産反映'),
+    )
+
     product = models.OneToOneField(Product, on_delete=models.CASCADE, verbose_name="商品")
     current_quantity = models.IntegerField(verbose_name="現在庫数（全倉庫合算）", default=0)
     safety_stock = models.IntegerField(verbose_name="安全在庫数", default=20)
-    inventory_date = models.DateField(verbose_name="棚卸日", null=True, blank=True, default=datetime.date(2026, 5, 31))
+    inventory_date = models.DateField(verbose_name="在庫基準日", null=True, blank=True, default=datetime.date(2026, 5, 31))
+    stock_source = models.CharField(verbose_name="在庫登録元", max_length=20, choices=STOCK_SOURCE_CHOICES, default='VALUATION')
     updated_at = models.DateTimeField(verbose_name="データ更新日時", auto_now=True)
 
     class Meta:

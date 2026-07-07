@@ -8,6 +8,7 @@ urlpatterns = [
     path('sales-history/', views.sales_history_dashboard, name='sales_history_dashboard'),
     path('valuation/', views.valuation_dashboard, name='valuation_dashboard'),
     path('about/', views.about_app, name='about_app'),
+    path('system-guide/', views.operation_guide, name='system_guide'),
     path('guide/', views.operation_guide, name='operation_guide'),
     
     # 商品マスタの画面直接更新・削除

@@ -269,15 +269,34 @@ def sync_snapshot_to_planning_inventory(inventory_date, current_company='IKUJI')
     products = Product.objects.filter(id__in=product_totals.keys())
     product_map = {product.id: product for product in products}
 
+    skipped_by_actual_stock = 0
+    skipped_product_ids = set()
+    existing_inventory_map = {
+        inventory.product_id: inventory
+        for inventory in Inventory.objects.filter(product_id__in=product_totals.keys())
+    }
+
     for product_id, quantity in product_totals.items():
         product = product_map[product_id]
+        existing_inventory = existing_inventory_map.get(product_id)
+        if (
+            existing_inventory
+            and existing_inventory.stock_source == 'ACTUAL'
+            and existing_inventory.inventory_date
+            and existing_inventory.inventory_date > inventory_date
+        ):
+            skipped_by_actual_stock += 1
+            skipped_product_ids.add(product_id)
+            continue
         Inventory.objects.update_or_create(
             product=product,
-            defaults={'current_quantity': quantity, 'inventory_date': inventory_date},
+            defaults={'current_quantity': quantity, 'inventory_date': inventory_date, 'stock_source': 'VALUATION'},
         )
         WarehouseInventory.objects.filter(product=product, warehouse__owner_company=current_company).delete()
 
     for (product_id, warehouse_id), quantity in warehouse_totals.items():
+        if product_id in skipped_product_ids:
+            continue
         WarehouseInventory.objects.update_or_create(
             product_id=product_id,
             warehouse_id=warehouse_id,
@@ -288,6 +307,7 @@ def sync_snapshot_to_planning_inventory(inventory_date, current_company='IKUJI')
         'products': len(product_totals),
         'warehouse_rows': len(warehouse_totals),
         'excluded_snapshots': excluded_snapshot_count,
+        'skipped_by_actual_stock': skipped_by_actual_stock,
     }
 
 

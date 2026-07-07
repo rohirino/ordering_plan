@@ -29,6 +29,11 @@
         .transit-badge { color: #ff8c00; font-weight: bold; } 
         .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.4); }
         .modal-content { background-color: white; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 75%; max-width: 1000px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .sales-modal-content { margin: 2vh auto; width: 95vw; max-width: none; height: 88vh; display: flex; flex-direction: column; box-sizing: border-box; }
+        .sales-modal-content.fullscreen { margin: 0; width: 100vw; height: 100vh; border-radius: 0; border: 0; }
+        .sales-chart-container { flex: 1; min-height: 0; position: relative; width: 100%; }
+        .sales-modal-toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; font-size:12px; }
+        .sales-modal-toolbar button { color:white; border:none; border-radius:4px; padding:4px 12px; font-weight:bold; cursor:pointer; }
         .close-btn { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
         .close-btn:hover { color: black; }
         .graph-btn { background-color: #17a2b8; color: white; border: none; padding: 2px 8px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 11px; height: 22px; white-space: nowrap; }
@@ -517,16 +522,17 @@
     </div>
 
     <div id="salesGraphModal" class="modal">
-        <div class="modal-content">
+        <div id="salesModalContent" class="modal-content sales-modal-content">
             <span class="close-btn" onclick="closeSalesModal()">&times;</span>
             <h3 id="salesModalTitle" style="margin-top: 0; color: #333;">商品別 販売実績推移</h3>
-            <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; font-size:12px;">
+            <div class="sales-modal-toolbar">
                 <label>開始日 <input type="date" id="salesStartDate" style="padding:3px;"></label>
                 <label>終了日 <input type="date" id="salesEndDate" style="padding:3px;"></label>
-                <button type="button" onclick="loadSalesGraph()" style="background:#2b8a3e; color:white; border:none; border-radius:4px; padding:4px 12px; font-weight:bold; cursor:pointer;">表示</button>
+                <button type="button" onclick="loadSalesGraph()" style="background:#2b8a3e;">表示</button>
+                <button type="button" onclick="toggleSalesFullscreen()" style="background:#495057;">全画面</button>
                 <span id="salesTotalLabel" style="font-weight:bold; color:#495057;"></span>
             </div>
-            <div style="position: relative; width: 100%; height: 420px;"><canvas id="salesChart"></canvas></div>
+            <div class="sales-chart-container"><canvas id="salesChart"></canvas></div>
         </div>
     </div>
 
@@ -566,6 +572,7 @@
         }
         function openSalesGraphModal(productId, productName) {
             currentSalesProductId = productId;
+            document.getElementById('salesModalContent').classList.remove('fullscreen');
             document.getElementById('salesGraphModal').style.display = "block";
             document.getElementById('salesModalTitle').innerText = productName + " - 販売実績推移";
             const end = new Date();
@@ -633,6 +640,11 @@
                         options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, title: { display: true, text: '販売数 (個)' } }, x: { title: { display: true, text: '日付' }, ticks: { maxTicksLimit: 18 } } } }
                     });
                 });
+        }
+        function toggleSalesFullscreen() {
+            const content = document.getElementById('salesModalContent');
+            content.classList.toggle('fullscreen');
+            setTimeout(() => { if (salesChartObj) { salesChartObj.resize(); } }, 80);
         }
         function closeSalesModal() { document.getElementById('salesGraphModal').style.display = "none"; }
         window.onclick = function(event) {

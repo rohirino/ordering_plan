@@ -32,6 +32,8 @@ urlpatterns = [
     path('delete-arrival-schedule/<int:arrival_id>/', views.delete_arrival_schedule, name='delete_arrival_schedule'),
     path('create-shipment-schedule/<int:product_id>/', views.create_shipment_schedule, name='create_shipment_schedule'),
     path('delete-shipment-schedule/<int:shipment_id>/', views.delete_shipment_schedule, name='delete_shipment_schedule'),
+    path('create-stockout-period/<int:product_id>/', views.create_stockout_period, name='create_stockout_period'),
+    path('delete-stockout-period/<int:period_id>/', views.delete_stockout_period, name='delete_stockout_period'),
     
     # 各種CSVインポート・エクスポート
     path('import-products/', views.import_products_csv, name='import_products_csv'),
@@ -50,6 +52,7 @@ urlpatterns = [
     path('export-inventory/', views.export_inventory_csv, name='export_inventory_csv'),
     path('export-sales/', views.export_sales_csv, name='export_sales_csv'),
     path('export-arrivals/', views.export_arrivals_csv, name='export_arrivals_csv'),
+    path('export-stockout-periods/', views.export_stockout_periods_csv, name='export_stockout_periods_csv'),
     path('export-order-plans-csv/', views.export_order_plans_csv, name='export_order_plans_csv'),
     path('export-order-plans-excel/', views.export_order_plans_excel, name='export_order_plans_excel'),
     path('export-inventory-states/', views.export_inventory_states_csv, name='export_inventory_states_csv'),
@@ -59,6 +62,7 @@ urlpatterns = [
     path('export-valuation-pdf/', views.export_valuation_pdf, name='export_valuation_pdf'),
     
     path('create-order/<int:product_id>/', views.create_order_plan, name='create_order_plan'),
+    path('product-sales-chart/<int:product_id>/', views.product_sales_chart_data, name='product_sales_chart_data'),
     path('products/', views.product_list, name='product_list'),
     path('delete-sales-period/', views.delete_sales_history_period, name='delete_sales_history_period'),
 ]

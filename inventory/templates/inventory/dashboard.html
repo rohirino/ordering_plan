@@ -320,6 +320,7 @@
             <div style="margin: 2px 0 0 0; display: flex; align-items: center; gap: 12px; background: #fff5f5; border: 1px dashed #ffc9c9; padding: 4px 10px; border-radius: 4px;">
                 <button type="submit" style="background-color: #dc3545; color: white; border: none; padding: 4px 14px; border-radius: 4px; font-weight: bold; font-size: 12px; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">📦 選択したチェック品番を一括で自動計算発注に投入する</button>
                 <label style="font-size: 12px; color: #e03131; font-weight: bold; cursor: pointer; user-select: none;"><input type="checkbox" id="selectAllItems" onchange="toggleSelectAll(this)" style="cursor: pointer;"> ページ内の全品番を選択 / 解除</label>
+                <a href="{% url 'export_stockout_periods_csv' %}?current_company={{ current_company }}" style="margin-left:auto; display:inline-block; padding:3px 8px; border:1px solid #f08c00; border-radius:4px; background:#fff9db; color:#8a5a00; text-decoration:none; font-size:11px; font-weight:bold;">欠品履歴CSV</a>
             </div>
         </form>
     </div>
@@ -390,6 +391,7 @@
                                     </div>
                                 </details>
                                 <button type="button" class="graph-btn" onclick="openGraphModal('{{ item.product.name|escapejs }}', [{% for day in item.forecast_timeline %}{{ day.stock }},{% endfor %}], [{% for day in item.forecast_timeline %}'{{ day.date|date:'m/d' }}',{% endfor %}], {{ item.order_point }}, {{ item.safety_stock }})">グラフ</button>
+                                <button type="button" class="graph-btn" style="background-color:#2b8a3e;" onclick="openSalesGraphModal({{ item.product.id }}, '{{ item.product.name|escapejs }}')">売上</button>
                             </div>
                         </div>
                     </td>
@@ -408,9 +410,9 @@
                     </td>
                     <td class="metric-stack">
                         <div class="metric-grid">
-                            <div class="metric-row" style="background-color: #f2f7ff;"><span class="metric-label">長期<span class="trend-days-pill">{{ item.product.trend_days }}日</span></span><span class="metric-value" style="color: #0056b3;">{{ item.demand_long_display }}</span></div>
-                            <div class="metric-row"><span class="metric-label">中期<span class="trend-days-pill">{{ item.mid_days }}日</span></span><span class="metric-value" style="color: #666;">{{ item.demand_mid }}</span></div>
-                            <div class="metric-row"><span class="metric-label">30日</span><span class="metric-value" style="color: #666;">{{ item.demand_30 }}</span></div>
+                            <div class="metric-row" style="background-color: #f2f7ff;"><span class="metric-label">長期<span class="trend-days-pill">{{ item.product.trend_days }}日</span>{% if item.stockout_long_days %}<span class="trend-days-pill" style="background:#fff3bf; color:#8a5a00; border-color:#ffd43b;">欠{{ item.stockout_long_days }}日延長</span>{% endif %}</span><span class="metric-value" style="color: #0056b3;">{{ item.demand_long_display }}</span></div>
+                            <div class="metric-row"><span class="metric-label">中期<span class="trend-days-pill">{{ item.mid_days }}日</span>{% if item.stockout_mid_days %}<span class="trend-days-pill" style="background:#fff3bf; color:#8a5a00; border-color:#ffd43b;">欠{{ item.stockout_mid_days }}日延長</span>{% endif %}</span><span class="metric-value" style="color: #666;">{{ item.demand_mid }}</span></div>
+                            <div class="metric-row"><span class="metric-label">30日{% if item.stockout_30_days %}<span class="trend-days-pill" style="background:#fff3bf; color:#8a5a00; border-color:#ffd43b;">欠{{ item.stockout_30_days }}日延長</span>{% endif %}</span><span class="metric-value" style="color: #666;">{{ item.demand_30 }}</span></div>
                         </div>
                     </td>
 
@@ -478,6 +480,28 @@
                         {% if item.future_shipments %}
                             <div class="shipment-summary">{% for shipment in item.future_shipments|slice:':2' %}{{ shipment.shipment_date|date:"m/d" }} {{ shipment.destination }} {{ shipment.quantity }}個{% if not forloop.last %}<br>{% endif %}{% endfor %}{% if item.future_shipments|length > 2 %}<br>ほか {{ item.future_shipments|length|add:'-2' }}件{% endif %}</div>
                         {% else %}<div class="shipment-summary">登録なし</div>{% endif %}
+                        <details class="shipment-details" style="margin-top: 5px;">
+                            <summary>欠品期間を登録{% if item.stockout_periods %}（{{ item.stockout_periods|length }}件）{% endif %}</summary>
+                            <div class="shipment-panel">
+                                <div style="margin-bottom:6px; font-size:10px; color:#6c757d;">この商品だけ、指定期間の日数ぶん過去へ販売履歴の参照範囲を延長します。販売履歴そのものは変更しません。</div>
+                                <form action="{% url 'create_stockout_period' item.product.id %}" method="POST" class="shipment-form">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="current_company" value="{{ current_company }}">
+                                    <input type="date" name="start_date" required aria-label="開始日">
+                                    <input type="date" name="end_date" required aria-label="終了日">
+                                    <input type="text" name="note" placeholder="メモ" aria-label="メモ">
+                                    <button type="submit">登録</button>
+                                </form>
+                                <div class="shipment-list">
+                                    {% for period in item.stockout_periods %}
+                                        <div class="shipment-list-row">
+                                            <span>{{ period.start_date|date:"m/d" }}</span><span title="{{ period.note }}">〜{{ period.end_date|date:"m/d" }}（{{ period.duration_days }}日）{% if period.note %} {{ period.note }}{% endif %}</span><span></span>
+                                            <form action="{% url 'delete_stockout_period' period.id %}" method="POST" style="margin:0;">{% csrf_token %}<input type="hidden" name="current_company" value="{{ current_company }}"><button type="submit" class="shipment-remove" aria-label="削除">削除</button></form>
+                                        </div>
+                                    {% empty %}<div style="padding-top:5px; font-size:10px; color:#6c757d;">登録された欠品期間はありません。</div>{% endfor %}
+                                </div>
+                            </div>
+                        </details>
                     </td>
                     {% for day in item.forecast_timeline %}<td class="timeline-cell" {% if day.stock <= 0 or day.stock <= item.safety_stock %} style="background-color: #ffcccc; color: Red; font-weight: bold;" {% elif day.stock <= item.order_point %} style="background-color: #fff3cd; color: #b58100; font-weight: bold;" {% endif %}><div>{{ day.stock }}</div><span class="detail-sub">{% if day.ship > 0 %}<span class="ship-text">出:{{ day.ship }}</span>{% endif %}{% if day.planned_order > 0 %}<span class="arr-text">計:{{ day.planned_order }}</span>{% endif %}{% if day.arr_kakutei > 0 %}<span class="arr-text">確:{{ day.arr_kakutei }}</span>{% endif %}{% if day.arr_koukaku > 0 %}<span class="arr-ko-text">高:{{ day.arr_koukaku }}</span>{% endif %}{% if day.arr_kibou > 0 %}<span class="arr-ko-text" style="color: #6c757d;">希:{{ day.arr_kibou }}</span>{% endif %}</span></td>{% endfor %}
                 </tr>
@@ -492,6 +516,20 @@
         <div class="modal-content"><span class="close-btn" onclick="closeModal()">&times;</span><h3 id="modalTitle" style="margin-top: 0; color: #333;">商品別 在庫予測推移</h3><div style="position: relative; width: 100%; height: 400px;"><canvas id="predictionChart"></canvas></div></div>
     </div>
 
+    <div id="salesGraphModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="closeSalesModal()">&times;</span>
+            <h3 id="salesModalTitle" style="margin-top: 0; color: #333;">商品別 販売実績推移</h3>
+            <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; font-size:12px;">
+                <label>開始日 <input type="date" id="salesStartDate" style="padding:3px;"></label>
+                <label>終了日 <input type="date" id="salesEndDate" style="padding:3px;"></label>
+                <button type="button" onclick="loadSalesGraph()" style="background:#2b8a3e; color:white; border:none; border-radius:4px; padding:4px 12px; font-weight:bold; cursor:pointer;">表示</button>
+                <span id="salesTotalLabel" style="font-weight:bold; color:#495057;"></span>
+            </div>
+            <div style="position: relative; width: 100%; height: 420px;"><canvas id="salesChart"></canvas></div>
+        </div>
+    </div>
+
     <script>
         function toggleOrderPanel() { const panel = document.getElementById('orderFoldPanel'); const icon = document.getElementById('orderToggleIcon'); panel.style.display = (panel.style.display === 'none') ? 'block' : 'none'; icon.innerText = (panel.style.display === 'none') ? '[ クリックで展開 ＋ ]' : '[ クリックで収納 － ]'; }
         function toggleSimPanel() { const panel = document.getElementById('simFoldPanel'); const icon = document.getElementById('simToggleIcon'); panel.style.display = (panel.style.display === 'none') ? 'block' : 'none'; icon.innerText = (panel.style.display === 'none') ? '[ クリックで展開 ＋ ]' : '[ クリックで収納 － ]'; if(panel.style.display==='block'){ setTimeout(runLogicSimulator, 50); } }
@@ -499,6 +537,8 @@
         // 一括選択スクリプト
         function toggleSelectAll(master) { const checkboxes = document.querySelectorAll('.item-checkbox'); checkboxes.forEach(cb => cb.checked = master.checked); }
         let myChart = null;
+        let salesChartObj = null;
+        let currentSalesProductId = null;
         function openGraphModal(productName, stockData, dateLabels, orderPoint, safetyStock) {
             document.getElementById('graphModal').style.display = "block";
             document.getElementById('modalTitle').innerText = productName + " - 未来120日間 在庫推移シミュレーション";
@@ -518,7 +558,60 @@
             });
         }
         function closeModal() { document.getElementById('graphModal').style.display = "none"; }
-        window.onclick = function(event) { const modal = document.getElementById('graphModal'); if (event.target == modal) { modal.style.display = "none"; } }
+        function toDateInputValue(date) {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+        function openSalesGraphModal(productId, productName) {
+            currentSalesProductId = productId;
+            document.getElementById('salesGraphModal').style.display = "block";
+            document.getElementById('salesModalTitle').innerText = productName + " - 販売実績推移";
+            const end = new Date();
+            const start = new Date();
+            start.setDate(end.getDate() - 179);
+            document.getElementById('salesStartDate').value = toDateInputValue(start);
+            document.getElementById('salesEndDate').value = toDateInputValue(end);
+            loadSalesGraph();
+        }
+        function loadSalesGraph() {
+            if (!currentSalesProductId) return;
+            const start = document.getElementById('salesStartDate').value;
+            const end = document.getElementById('salesEndDate').value;
+            const url = `{% url 'product_sales_chart_data' 0 %}`.replace('/0/', `/${currentSalesProductId}/`) + `?current_company={{ current_company }}&start_date=${start}&end_date=${end}`;
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('salesTotalLabel').innerText = `期間合計: ${data.total_quantity} 個`;
+                    if (salesChartObj) { salesChartObj.destroy(); }
+                    const ctx = document.getElementById('salesChart').getContext('2d');
+                    salesChartObj = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: data.labels,
+                            datasets: [{
+                                label: '日別販売数',
+                                data: data.quantities,
+                                borderColor: '#2b8a3e',
+                                backgroundColor: 'rgba(43, 138, 62, 0.08)',
+                                borderWidth: 2,
+                                pointRadius: 1,
+                                tension: 0.15,
+                                fill: true
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, title: { display: true, text: '販売数 (個)' } }, x: { title: { display: true, text: '日付' }, ticks: { maxTicksLimit: 18 } } } }
+                    });
+                });
+        }
+        function closeSalesModal() { document.getElementById('salesGraphModal').style.display = "none"; }
+        window.onclick = function(event) {
+            const modal = document.getElementById('graphModal');
+            const salesModal = document.getElementById('salesGraphModal');
+            if (event.target == modal) { modal.style.display = "none"; }
+            if (event.target == salesModal) { salesModal.style.display = "none"; }
+        }
 
         // ★新設：⑤ 需要予測ロジック検証シミュレーターの駆動用独立スクリプト
         let simChartObj = null;

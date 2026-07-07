@@ -6,9 +6,9 @@ import html
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 from django.contrib import messages
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, Order, ShipmentSchedule, ArrivalSchedule, ProductVariant, InventoryState, InventoryValuationSnapshot, ImportLog, SalesImportSkip
+from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, Order, ShipmentSchedule, ArrivalSchedule, ProductVariant, InventoryState, InventoryValuationSnapshot, ImportLog, SalesImportSkip, ProductStockoutPeriod
 from .product_importer import import_uploaded_product_file
 from .sales_importer import import_uploaded_sales_file
 from .valuation_service import (
@@ -196,6 +196,102 @@ def _get_planning_base_date(target_company='IKUJI', stock_base_date=None):
         return latest_sales_date + timedelta(days=1)
     return datetime.date.today()
 
+def _overlap_days(start_a, end_a, start_b, end_b):
+    start = max(start_a, start_b)
+    end = min(end_a, end_b)
+    if start > end:
+        return 0
+    return (end - start).days + 1
+
+def _period_stockout_days(periods, start_date, cutoff_date):
+    return sum(_overlap_days(period['start_date'], period['end_date'], start_date, cutoff_date) for period in periods)
+
+def _build_adjusted_sales_windows(product_ids, cutoff_date, windows):
+    product_ids = [pid for pid in product_ids if pid]
+    windows = sorted({int(days) for days in windows if int(days) > 0})
+    if not product_ids or not windows:
+        return {}
+    periods = ProductStockoutPeriod.objects.filter(
+        product_id__in=product_ids,
+        start_date__lte=cutoff_date,
+    ).values('product_id', 'start_date', 'end_date')
+    periods_by_product = {}
+    for period in periods:
+        periods_by_product.setdefault(period['product_id'], []).append(period)
+
+    result = {pid: {} for pid in product_ids}
+    for pid in product_ids:
+        product_periods = periods_by_product.get(pid, [])
+        for days in windows:
+            start_date = cutoff_date - timedelta(days=days - 1)
+            for _ in range(10):
+                stockout_days = _period_stockout_days(product_periods, start_date, cutoff_date)
+                adjusted_start = cutoff_date - timedelta(days=days + stockout_days - 1)
+                if adjusted_start == start_date:
+                    break
+                start_date = adjusted_start
+            stockout_days = _period_stockout_days(product_periods, start_date, cutoff_date)
+            result[pid][days] = {
+                'start_date': start_date,
+                'stockout_days': stockout_days,
+                'calendar_days': (cutoff_date - start_date).days + 1,
+                'effective_days': days,
+            }
+    return result
+
+def _window_meta(adjusted_windows, product_id, nominal_days):
+    return adjusted_windows.get(product_id, {}).get(nominal_days, {
+        'start_date': None,
+        'stockout_days': 0,
+        'calendar_days': nominal_days,
+        'effective_days': nominal_days,
+    })
+
+def _attach_stockout_effective_days(sales_item, product_id, adjusted_windows, days_list):
+    for days in days_list:
+        meta = _window_meta(adjusted_windows, product_id, days)
+        sales_item[f'stockout_{days}'] = meta['stockout_days']
+        sales_item[f'effective_{days}'] = meta['effective_days']
+        sales_item[f'window_start_{days}'] = meta['start_date']
+    return sales_item
+
+def _default_sales_data(product_id, adjusted_windows=None):
+    data = {
+        'sum_30': 0, 'sum_45': 0, 'sum_60': 0, 'sum_75': 0,
+        'sum_90': 0, 'sum_120': 0, 'sum_150': 0, 'sum_180': 0, 'sum_long': 0,
+    }
+    if adjusted_windows is not None:
+        _attach_stockout_effective_days(data, product_id, adjusted_windows, [30, 45, 60, 75, 90, 120, 150, 180])
+    return data
+
+def _build_adjusted_sales_maps(product_ids, cutoff_date, windows, adjusted_windows):
+    product_ids = [pid for pid in product_ids if pid]
+    windows = sorted({int(days) for days in windows if int(days) > 0})
+    if not product_ids or not windows:
+        return {}, {}
+    starts = [
+        meta['start_date']
+        for product_windows in adjusted_windows.values()
+        for meta in product_windows.values()
+        if meta.get('start_date')
+    ]
+    earliest_start = min(starts) if starts else cutoff_date - timedelta(days=max(windows) - 1)
+    rows = SalesHistory.objects.filter(
+        product_id__in=product_ids,
+        is_advance_order=False,
+        sold_date__gte=earliest_start,
+        sold_date__lte=cutoff_date,
+    ).values('product_id', 'company', 'sold_date', 'quantity')
+    sales_map_ikuji, sales_map_select = {}, {}
+    for row in rows:
+        target_map = sales_map_ikuji if row['company'] == 'IKUJI' else sales_map_select
+        item = target_map.setdefault(row['product_id'], _default_sales_data(row['product_id'], adjusted_windows))
+        for days in windows:
+            start_date = _window_meta(adjusted_windows, row['product_id'], days)['start_date']
+            if start_date and row['sold_date'] >= start_date:
+                item[f'sum_{days}'] = item.get(f'sum_{days}', 0) + row['quantity']
+    return sales_map_ikuji, sales_map_select
+
 def _recalculate_abc_ranks(target_company='IKUJI', base_date=None, sales_cutoff_date=None):
     """【現実的改修】各商品の個別設定「長期トレンド日数」に100%自動連動してABCを評価する"""
     stock_base_date = _get_stock_base_date(target_company)
@@ -204,18 +300,10 @@ def _recalculate_abc_ranks(target_company='IKUJI', base_date=None, sales_cutoff_
     
     # 1. 会社に所属する全マスタをロード
     products = Product.objects.filter(owner_company=target_company, is_discontinued=False)
-    
-    # 2. 期間ごとの売上（90, 120, 150, 180日）をデータベースから一括アノテーション取得（高速化）
-    sales_summary = SalesHistory.objects.filter(
-        company=target_company, is_advance_order=False,
-        sold_date__gte=sales_cutoff_date - timedelta(days=180), sold_date__lte=sales_cutoff_date
-    ).values('product_id').annotate(
-        sum_90=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())),
-        sum_120=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=120), then='quantity'), default=0, output_field=IntegerField())),
-        sum_150=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=150), then='quantity'), default=0, output_field=IntegerField())),
-        sum_180=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=180), then='quantity'), default=0, output_field=IntegerField())),
-    )
-    sales_map = {item['product_id']: item for item in sales_summary}
+    product_ids = list(products.values_list('id', flat=True))
+    adjusted_windows = _build_adjusted_sales_windows(product_ids, sales_cutoff_date, [90, 120, 150, 180])
+    sales_map_ikuji, sales_map_select = _build_adjusted_sales_maps(product_ids, sales_cutoff_date, [90, 120, 150, 180], adjusted_windows)
+    sales_map = sales_map_ikuji if target_company == 'IKUJI' else sales_map_select
     
     # 3. 各商品が「自身の長期ベース設定」で稼いだ売上数をマッピング
     scored_products = []
@@ -257,7 +345,8 @@ def _recalculate_abc_ranks(target_company='IKUJI', base_date=None, sales_cutoff_
             s_data = sales_map.get(p.id, {'sum_90': 0, 'sum_120': 0, 'sum_150': 0, 'sum_180': 0})
             tdays = p.trend_days
             p_qty = s_data['sum_120'] if tdays == 120 else s_data['sum_150'] if tdays == 150 else s_data['sum_180'] if tdays == 180 else s_data['sum_90']
-            if (p_qty or 0) == 0:
+            tdays = tdays if tdays in [90, 120, 150, 180] else 90
+            if (p_qty or 0) == 0 and _window_meta(adjusted_windows, p.id, tdays)['stockout_days'] == 0:
                 p.abc_rank = 'DEAD'
                 
     Product.objects.bulk_update(p_dict.values(), ['abc_rank'])
@@ -266,8 +355,10 @@ def _execute_single_order_plan(product, inventory, base_date, future_end_date, s
     pid = product.id
     sales_data = sales_map_select.get(pid, {'sum_30': 0, 'sum_long': 0}) if product.demand_source == 'SELECT' else sales_map_ikuji.get(pid, {'sum_30': 0, 'sum_long': 0})
     tdays = product.trend_days if product.trend_days in [90, 120, 150, 180] else 90
-    daily_long = sales_data.get('sum_long', 0) / tdays
-    daily_short = sales_data.get('sum_30', 0) / 30
+    effective_long_days = sales_data.get('effective_long', tdays) or tdays
+    effective_30_days = sales_data.get('effective_30', 30) or 30
+    daily_long = sales_data.get('sum_long', 0) / effective_long_days
+    daily_short = sales_data.get('sum_30', 0) / effective_30_days
     raw_trend = daily_short / daily_long if daily_long > 0 else 1.0
     applied_trend = max(product.trend_min, min(raw_trend, product.trend_max))
     daily_demand = daily_long * applied_trend
@@ -353,23 +444,12 @@ def planning_dashboard(request):
     abc_filter = request.GET.get('abc_filter', '').strip()
     supplier_code = request.GET.get('supplier_code', '').strip()
     show_discontinued = request.GET.get('show_discontinued') == '1'
-    thirty_days_ago = sales_cutoff_date - timedelta(days=30)
-    long_check_date = sales_cutoff_date - timedelta(days=months_val * 30)
-    sales_summary = SalesHistory.objects.filter(is_advance_order=False, sold_date__gte=sales_cutoff_date - timedelta(days=180), sold_date__lte=sales_cutoff_date).values('product_id', 'company').annotate(
-        sum_30=Sum(Case(When(sold_date__gte=thirty_days_ago, then='quantity'), default=0, output_field=IntegerField())),
-        sum_45=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=45), then='quantity'), default=0, output_field=IntegerField())),
-        sum_60=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=60), then='quantity'), default=0, output_field=IntegerField())),
-        sum_75=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=75), then='quantity'), default=0, output_field=IntegerField())),
-        sum_90=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())),
-        sum_120=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=120), then='quantity'), default=0, output_field=IntegerField())),
-        sum_150=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=150), then='quantity'), default=0, output_field=IntegerField())),
-        sum_180=Sum(Case(When(sold_date__gte=sales_cutoff_date - timedelta(days=180), then='quantity'), default=0, output_field=IntegerField())),
-        sum_long=Sum(Case(When(sold_date__gte=long_check_date, then='quantity'), default=0, output_field=IntegerField()))
-    )
-    sales_map_ikuji, sales_map_select = {}, {}
-    for item in sales_summary:
-        if item['company'] == 'IKUJI': sales_map_ikuji[item['product_id']] = item
-        else: sales_map_select[item['product_id']] = item
+    planning_product_ids = list(Product.objects.filter(owner_company=current_company).values_list('id', flat=True))
+    stockout_windows = [30, 45, 60, 75, 90, 120, 150, 180, months_val * 30]
+    adjusted_windows = _build_adjusted_sales_windows(planning_product_ids, sales_cutoff_date, stockout_windows)
+    sales_map_ikuji, sales_map_select = _build_adjusted_sales_maps(planning_product_ids, sales_cutoff_date, stockout_windows, adjusted_windows)
+    for item in list(sales_map_ikuji.values()) + list(sales_map_select.values()):
+        item['sum_long'] = item.get(f'sum_{months_val * 30}', 0)
     inventories = Inventory.objects.select_related('product').filter(product__is_excluded=False, product__owner_company=current_company).order_by('product__code')
     if not show_discontinued:
         inventories = inventories.filter(product__is_discontinued=False)
@@ -423,9 +503,13 @@ def planning_dashboard(request):
         all_inventories_for_kpi = all_inventories_for_kpi.filter(product__is_discontinued=False)
     for k_item in all_inventories_for_kpi:
         k_pid = k_item.product.id
-        k_sales = sales_map_select.get(k_pid, {'sum_30': 0, 'sum_long': 0}) if k_item.product.demand_source == 'SELECT' else sales_map_ikuji.get(k_pid, {'sum_30': 0, 'sum_long': 0})
+        k_sales = sales_map_select.get(k_pid, _default_sales_data(k_pid, adjusted_windows)) if k_item.product.demand_source == 'SELECT' else sales_map_ikuji.get(k_pid, _default_sales_data(k_pid, adjusted_windows))
         k_tdays = k_item.product.trend_days if k_item.product.trend_days in [90, 120, 150, 180] else 90
-        k_daily_demand = (k_sales.get('sum_long', 0) / k_tdays) * max(k_item.product.trend_min, min(((k_sales.get('sum_30', 0) / 30) / (k_sales.get('sum_long', 0) / k_tdays) if k_sales.get('sum_long', 0) > 0 else 1.0), k_item.product.trend_max))
+        k_effective_long = k_sales.get(f'effective_{k_tdays}', k_tdays)
+        k_effective_30 = k_sales.get('effective_30', 30)
+        k_daily_long = k_sales.get(f'sum_{k_tdays}', 0) / k_effective_long
+        k_daily_short = k_sales.get('sum_30', 0) / k_effective_30
+        k_daily_demand = k_daily_long * max(k_item.product.trend_min, min((k_daily_short / k_daily_long if k_daily_long > 0 else 1.0), k_item.product.trend_max))
         k_order_point = (k_daily_demand * k_item.product.lead_time) + k_item.safety_stock
         k_stock = sum(wh_stock_map.get(k_pid, {}).values()) + cross_company_stock.get(k_item.product.code, 0) if current_company == 'SELECT' else sum(wh_stock_map.get(k_pid, {}).values())
         k_ships = ship_map.get(k_pid, {}); k_arrs = arr_map.get(k_pid, {}); k_orders = planned_order_map.get(k_pid, {}); k_has_shortage, k_has_op = False, False
@@ -444,17 +528,28 @@ def planning_dashboard(request):
         inventory_date_choices.append({'value': m_end.strftime('%Y-%m-%d'), 'display': m_end.strftime('%Y年%m月末')})
         current_target = m_end.replace(day=1)
     visible_inventories = []
+    visible_product_ids = [item.product_id for item in page_obj]
+    stockout_periods_map = {}
+    for period in ProductStockoutPeriod.objects.filter(product_id__in=visible_product_ids).order_by('-start_date', '-end_date'):
+        stockout_periods_map.setdefault(period.product_id, []).append(period)
     for item in page_obj:
         pid = item.product.id; pcode = item.product.code
-        sales_data = sales_map_select.get(pid, {'sum_30': 0, 'sum_45': 0, 'sum_60': 0, 'sum_75': 0, 'sum_90': 0, 'sum_120': 0, 'sum_150': 0, 'sum_180': 0, 'sum_long': 0}) if item.product.demand_source == 'SELECT' else sales_map_ikuji.get(pid, {'sum_30': 0, 'sum_45': 0, 'sum_60': 0, 'sum_75': 0, 'sum_90': 0, 'sum_120': 0, 'sum_150': 0, 'sum_180': 0, 'sum_long': 0})
+        sales_data = sales_map_select.get(pid, _default_sales_data(pid, adjusted_windows)) if item.product.demand_source == 'SELECT' else sales_map_ikuji.get(pid, _default_sales_data(pid, adjusted_windows))
         item.demand_30 = round(sales_data['sum_30'], 1)
         item.mid_days = (item.product.trend_days if item.product.trend_days in [90, 120, 150, 180] else 90) // 2
-        item.demand_mid = round((sales_data.get(f'sum_{item.mid_days}', 0) or 0) * 30 / item.mid_days, 1)
+        item.demand_mid = round((sales_data.get(f'sum_{item.mid_days}', 0) or 0) * 30 / (sales_data.get(f'effective_{item.mid_days}', item.mid_days) or item.mid_days), 1)
         tdays = item.product.trend_days
         total_long_sales = sales_data['sum_120'] if tdays == 120 else sales_data['sum_150'] if tdays == 150 else sales_data['sum_180'] if tdays == 180 else sales_data['sum_90']
         if tdays not in [120, 150, 180]: tdays = 90
-        daily_long = total_long_sales / tdays; daily_short = sales_data['sum_30'] / 30
+        effective_long_days = sales_data.get(f'effective_{tdays}', tdays) or tdays
+        effective_30_days = sales_data.get('effective_30', 30) or 30
+        daily_long = total_long_sales / effective_long_days; daily_short = sales_data['sum_30'] / effective_30_days
         item.demand_long_display = round(daily_long * 30, 1)
+        item.demand_30 = round(daily_short * 30, 1)
+        item.stockout_long_days = sales_data.get(f'stockout_{tdays}', 0)
+        item.stockout_mid_days = sales_data.get(f'stockout_{item.mid_days}', 0)
+        item.stockout_30_days = sales_data.get('stockout_30', 0)
+        item.stockout_periods = stockout_periods_map.get(pid, [])
         raw_trend = daily_short / daily_long if daily_long > 0 else 1.0
         applied_trend = max(item.product.trend_min, min(raw_trend, item.product.trend_max))
         item.raw_trend, item.applied_trend = round(raw_trend, 2), round(applied_trend, 2)
@@ -1061,16 +1156,46 @@ def delete_shipment_schedule(request, shipment_id):
     return redirect(request.META.get('HTTP_REFERER', f'/?current_company={current_company}'))
 
 @require_POST
+def create_stockout_period(request, product_id):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    product = get_object_or_404(Product, id=product_id, owner_company=current_company)
+    try:
+        start_date = datetime.datetime.strptime(request.POST.get('start_date', ''), '%Y-%m-%d').date()
+        end_date = datetime.datetime.strptime(request.POST.get('end_date', ''), '%Y-%m-%d').date()
+        if end_date < start_date:
+            raise ValueError('終了日は開始日以降で入力してください。')
+        note = (request.POST.get('note') or '').strip()
+        ProductStockoutPeriod.objects.create(product=product, start_date=start_date, end_date=end_date, note=note)
+        messages.success(request, f"商品［{product.code}］の欠品期間を登録しました。")
+    except ValueError as exc:
+        messages.error(request, f"欠品期間の登録エラー: {exc}")
+    return redirect(request.META.get('HTTP_REFERER', f'/?current_company={current_company}'))
+
+@require_POST
+def delete_stockout_period(request, period_id):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    period = get_object_or_404(ProductStockoutPeriod, id=period_id, product__owner_company=current_company)
+    product_code = period.product.code
+    period.delete()
+    messages.info(request, f"商品［{product_code}］の欠品期間を削除しました。")
+    return redirect(request.META.get('HTTP_REFERER', f'/?current_company={current_company}'))
+
+@require_POST
 def create_order_plan(request, product_id):
     product = get_object_or_404(Product, id=product_id); inventory = Inventory.objects.get(product=product)
     stock_base_date = _get_stock_base_date(product.owner_company, _parse_stock_base_date(request.POST.get('stock_base_date')))
     base_date = _get_planning_base_date(product.owner_company, stock_base_date); future_end_date = base_date + timedelta(days=120)
     sales_cutoff_date = stock_base_date or base_date
-    sales_summary = SalesHistory.objects.filter(is_advance_order=False, sold_date__gte=sales_cutoff_date - timedelta(days=180), sold_date__lte=sales_cutoff_date).values('product_id', 'company').annotate(sum_30=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=30), then='quantity'), default=0, output_field=IntegerField())), sum_long=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=product.trend_days), then='quantity'), default=0, output_field=IntegerField())))
-    s_map_ikuji, s_map_select = {}, {}
-    for item in sales_summary:
-        if item['company'] == 'IKUJI': s_map_ikuji[item['product_id']] = item
-        else: s_map_select[item['product_id']] = item
+    trend_days = product.trend_days if product.trend_days in [90, 120, 150, 180] else 90
+    adjusted_windows = _build_adjusted_sales_windows([product.id], sales_cutoff_date, [30, trend_days])
+    s_map_ikuji, s_map_select = _build_adjusted_sales_maps([product.id], sales_cutoff_date, [30, trend_days], adjusted_windows)
+    for item in list(s_map_ikuji.values()) + list(s_map_select.values()):
+        item['sum_long'] = item.get(f'sum_{trend_days}', 0)
+        item['effective_long'] = item.get(f'effective_{trend_days}', trend_days)
     ship_map = {s['product_id']: {s['shipment_date']: s['total']} for s in ShipmentSchedule.objects.filter(shipment_date__gte=base_date, shipment_date__lte=future_end_date).values('product_id', 'shipment_date').annotate(total=Sum('quantity'))}
     arr_map = _build_arrival_map(ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date))
     existing_order_map = _build_order_arrival_map(Order.objects.filter(product=product, status__in=['計画中', '発注済']))
@@ -1093,24 +1218,16 @@ def bulk_create_order_plan(request):
         messages.warning(request, "選択した商品は現在の会社の発注対象ではありません。")
         return redirect('/?current_company=' + current_company)
 
-    # 商品ごとの長期ベース日数に合わせて、90〜180日の集計から必要な販売数を選ぶ。
-    sales_summary = SalesHistory.objects.filter(is_advance_order=False, sold_date__gte=sales_cutoff_date - timedelta(days=180), sold_date__lte=sales_cutoff_date).values('product_id', 'company').annotate(
-        sum_30=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=30), then='quantity'), default=0, output_field=IntegerField())),
-        sum_90=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=90), then='quantity'), default=0, output_field=IntegerField())),
-        sum_120=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=120), then='quantity'), default=0, output_field=IntegerField())),
-        sum_150=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=150), then='quantity'), default=0, output_field=IntegerField())),
-        sum_180=Sum(Case(When(sold_date__gte=sales_cutoff_date-timedelta(days=180), then='quantity'), default=0, output_field=IntegerField())),
-    )
     products_by_id = {product.id: product for product in products}
-    s_map_ikuji, s_map_select = {}, {}
-    for item in sales_summary:
+    adjusted_windows = _build_adjusted_sales_windows(products_by_id.keys(), sales_cutoff_date, [30, 90, 120, 150, 180])
+    s_map_ikuji, s_map_select = _build_adjusted_sales_maps(products_by_id.keys(), sales_cutoff_date, [30, 90, 120, 150, 180], adjusted_windows)
+    for item in list(s_map_ikuji.values()) + list(s_map_select.values()):
         product = products_by_id.get(item['product_id'])
         if not product:
             continue
         trend_days = product.trend_days if product.trend_days in [90, 120, 150, 180] else 90
         item['sum_long'] = item.get(f'sum_{trend_days}', 0) or 0
-        if item['company'] == 'IKUJI': s_map_ikuji[item['product_id']] = item
-        else: s_map_select[item['product_id']] = item
+        item['effective_long'] = item.get(f'effective_{trend_days}', trend_days)
     ship_map, arr_map = {}, {}
     for s in ShipmentSchedule.objects.filter(shipment_date__gte=base_date, shipment_date__lte=future_end_date): ship_map.setdefault(s.product_id, {})[s.shipment_date] = ship_map.setdefault(s.product_id, {}).get(s.shipment_date, 0) + s.quantity
     arr_map = _build_arrival_map(ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date))
@@ -1446,6 +1563,68 @@ def export_arrivals_csv(request):
     buf = io.StringIO(); writer = csv.writer(buf); writer.writerow(['商品コード', '商品名', '入荷予定日', '入荷予定数量', '確度ステータス'])
     for a in ArrivalSchedule.objects.select_related('product').filter(product__owner_company=cc): writer.writerow([a.product.code, a.product.name, a.arrival_date.strftime('%Y/%m/%d'), a.quantity, a.status])
     res.write(buf.getvalue().encode('cp932', errors='replace')); return res
+
+def export_stockout_periods_csv(request):
+    cc = request.GET.get('current_company', 'IKUJI')
+    if cc not in ['IKUJI', 'SELECT']:
+        cc = 'IKUJI'
+    res = HttpResponse(content_type='text/csv')
+    res['Content-Disposition'] = f'attachment; filename="stockout_periods_{cc}.csv"'
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['商品コード', '商品名', '欠品開始日', '欠品終了日', '欠品日数', 'メモ'])
+    periods = ProductStockoutPeriod.objects.select_related('product').filter(
+        product__owner_company=cc,
+    ).order_by('product__code', '-start_date', '-end_date')
+    for period in periods:
+        writer.writerow([
+            period.product.code,
+            period.product.name,
+            period.start_date.strftime('%Y/%m/%d'),
+            period.end_date.strftime('%Y/%m/%d'),
+            period.duration_days,
+            period.note,
+        ])
+    res.write(buf.getvalue().encode('cp932', errors='replace'))
+    return res
+
+def product_sales_chart_data(request, product_id):
+    current_company = request.GET.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
+    product = get_object_or_404(Product, id=product_id)
+    default_end = _get_stock_base_date(current_company) or datetime.date.today()
+    start_date = _parse_stock_base_date(request.GET.get('start_date')) or (default_end - timedelta(days=179))
+    end_date = _parse_stock_base_date(request.GET.get('end_date')) or default_end
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+    max_days = 730
+    if (end_date - start_date).days > max_days:
+        start_date = end_date - timedelta(days=max_days)
+
+    rows = SalesHistory.objects.filter(
+        product=product,
+        company=current_company,
+        is_advance_order=False,
+        sold_date__gte=start_date,
+        sold_date__lte=end_date,
+    ).values('sold_date').annotate(quantity=Sum('quantity')).order_by('sold_date')
+    quantity_by_date = {row['sold_date']: row['quantity'] or 0 for row in rows}
+    labels, quantities = [], []
+    day = start_date
+    while day <= end_date:
+        labels.append(day.strftime('%Y/%m/%d'))
+        quantities.append(quantity_by_date.get(day, 0))
+        day += timedelta(days=1)
+    return JsonResponse({
+        'product_code': product.code,
+        'product_name': product.name,
+        'start_date': start_date.strftime('%Y-%m-%d'),
+        'end_date': end_date.strftime('%Y-%m-%d'),
+        'labels': labels,
+        'quantities': quantities,
+        'total_quantity': sum(quantities),
+    })
 
 def _order_plan_export_rows(current_company):
     return Order.objects.select_related('product').filter(

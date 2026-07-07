@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, ShipmentSchedule, ArrivalSchedule, Order, ImportLog
+from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, ShipmentSchedule, ArrivalSchedule, Order, ImportLog, ProductStockoutPeriod
 
 class WarehouseInventoryInline(admin.TabularInline):
     model = WarehouseInventory
@@ -54,6 +54,17 @@ class ShipmentScheduleAdmin(admin.ModelAdmin):
     list_display = ('shipment_date', 'get_code', 'get_name', 'destination', 'quantity')
     list_filter = ('shipment_date',)
     search_fields = ('product__code', 'product__name', 'destination')
+
+    def get_code(self, obj): return obj.product.code
+    get_code.short_description = '商品コード'
+    def get_name(self, obj): return obj.product.name
+    get_name.short_description = '商品名'
+
+@admin.register(ProductStockoutPeriod)
+class ProductStockoutPeriodAdmin(admin.ModelAdmin):
+    list_display = ('start_date', 'end_date', 'duration_days', 'get_code', 'get_name', 'note')
+    list_filter = ('start_date', 'end_date')
+    search_fields = ('product__code', 'product__name', 'note')
 
     def get_code(self, obj): return obj.product.code
     get_code.short_description = '商品コード'

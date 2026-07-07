@@ -196,6 +196,27 @@ class SalesHistory(models.Model):
         verbose_name_plural = "日次販売履歴"
 
 
+class ProductStockoutPeriod(models.Model):
+    """需要計算から除外する商品別欠品期間"""
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='stockout_periods', verbose_name="商品")
+    start_date = models.DateField(verbose_name="欠品開始日")
+    end_date = models.DateField(verbose_name="欠品終了日")
+    note = models.CharField(verbose_name="メモ", max_length=100, blank=True, default='')
+    created_at = models.DateTimeField(verbose_name="登録日時", auto_now_add=True)
+
+    def __str__(self):
+        return f"[{self.product.code}] {self.start_date:%Y/%m/%d}-{self.end_date:%Y/%m/%d}"
+
+    @property
+    def duration_days(self):
+        return (self.end_date - self.start_date).days + 1
+
+    class Meta:
+        verbose_name = "商品別欠品期間"
+        verbose_name_plural = "商品別欠品期間"
+        ordering = ['-start_date', '-end_date']
+
+
 class ShipmentSchedule(models.Model):
     """先付け受注を含む出荷予定データ"""
     product = models.ForeignKey(Product, on_delete=models.CASCADE, verbose_name="商品")

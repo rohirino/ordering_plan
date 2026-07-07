@@ -19,7 +19,7 @@ from inventory.models import (
 
 
 ENCODINGS = ('cp932', 'utf-8-sig', 'utf-8', 'shift_jis')
-SELECT_ASSET_STATE_CODES = {'400', '401', '404'}
+SELECT_ASSET_STATE_CODES = {'400', '404'}
 WAREHOUSE_NAME_ALIASES = {
     'ニチイク在庫': 'ﾆﾁｲｸ物流',
     '岸和田在庫': '岸和田倉庫',

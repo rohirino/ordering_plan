@@ -380,8 +380,6 @@
                                             <select name="trend_days"><option value="90" {% if item.product.trend_days == 90 %}selected{% endif %}>90日間（標準）</option><option value="120" {% if item.product.trend_days == 120 %}selected{% endif %}>120日間</option><option value="150" {% if item.product.trend_days == 150 %}selected{% endif %}>150日間</option><option value="180" {% if item.product.trend_days == 180 %}selected{% endif %}>180日間</option></select>
                                             <label>超過ルール</label>
                                             <select name="lot_rule"><option value="ROUND_UP_LOT" {% if item.product.lot_rule == 'ROUND_UP_LOT' %}selected{% endif %}>ロット単位の倍数に切上</option><option value="MIN_LOT_ONLY" {% if item.product.lot_rule == 'MIN_LOT_ONLY' %}selected{% endif %}>最低ロット後は1個刻み</option></select>
-                                            <label>需要参照元</label>
-                                            <select name="demand_source"><option value="IKUJI" {% if item.product.demand_source == 'IKUJI' %}selected{% endif %}>自社(日本育児)売上</option><option value="SELECT" {% if item.product.demand_source == 'SELECT' %}selected{% endif %}>ペットセレクト売上</option></select>
                                             <div class="config-checks">
                                                 {% if item.product.abc_rank == 'DEAD' %}<label class="dead-order-label"><input type="checkbox" name="allow_dead_order" {% if item.product.allow_dead_order %}checked{% endif %}>例外発注を許可</label>{% endif %}
                                                 <label><input type="checkbox" name="is_excluded" {% if item.product.is_excluded %}checked{% endif %}>この商品を管理外にする</label>

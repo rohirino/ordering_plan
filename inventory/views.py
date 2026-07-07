@@ -159,16 +159,35 @@ def _build_order_arrival_map(queryset):
             order_map[order.product_id][order.expected_arrival_date] += order.quantity
     return order_map
 
+def _company_relevant_product_ids(target_company='IKUJI', include_master=True):
+    product_ids = set()
+    if include_master:
+        product_ids.update(Product.objects.filter(owner_company=target_company).values_list('id', flat=True))
+    product_ids.update(SalesHistory.objects.filter(company=target_company).values_list('product_id', flat=True).distinct())
+    product_ids.update(
+        WarehouseInventory.objects.filter(
+            warehouse__owner_company=target_company,
+            warehouse__is_active=True,
+        ).values_list('product_id', flat=True).distinct()
+    )
+    product_ids.update(
+        InventoryValuationSnapshot.objects.filter(
+            owner_company=target_company,
+        ).values_list('product_variant__product_id', flat=True).distinct()
+    )
+    return product_ids
+
 def _get_latest_stock_base_date(target_company='IKUJI'):
+    product_ids = _company_relevant_product_ids(target_company)
     latest_actual_date = Inventory.objects.filter(
-        product__owner_company=target_company,
+        product_id__in=product_ids,
         stock_source='ACTUAL',
         inventory_date__isnull=False,
     ).aggregate(latest=Max('inventory_date'))['latest']
     if latest_actual_date:
         return latest_actual_date
     return Inventory.objects.filter(
-        product__owner_company=target_company,
+        product_id__in=product_ids,
         inventory_date__isnull=False,
     ).aggregate(latest=Max('inventory_date'))['latest']
 
@@ -298,8 +317,8 @@ def _recalculate_abc_ranks(target_company='IKUJI', base_date=None, sales_cutoff_
     base_date = base_date or _get_planning_base_date(target_company, stock_base_date)
     sales_cutoff_date = sales_cutoff_date or stock_base_date or base_date
     
-    # 1. 会社に所属する全マスタをロード
-    products = Product.objects.filter(owner_company=target_company, is_discontinued=False)
+    product_ids = _company_relevant_product_ids(target_company)
+    products = Product.objects.filter(id__in=product_ids, is_discontinued=False)
     product_ids = list(products.values_list('id', flat=True))
     adjusted_windows = _build_adjusted_sales_windows(product_ids, sales_cutoff_date, [90, 120, 150, 180])
     sales_map_ikuji, sales_map_select = _build_adjusted_sales_maps(product_ids, sales_cutoff_date, [90, 120, 150, 180], adjusted_windows)
@@ -339,7 +358,7 @@ def _recalculate_abc_ranks(target_company='IKUJI', base_date=None, sales_cutoff_
             
     # 4. 「自身の設定期間内」で売上が0、かつ現在庫が残っているものを「DEAD（処分推奨）」に上書き
     p_dict = {item['product'].id: item['product'] for item in scored_products}
-    for inv in Inventory.objects.filter(current_quantity__gt=0, product__owner_company=target_company):
+    for inv in Inventory.objects.filter(current_quantity__gt=0, product_id__in=product_ids):
         p = p_dict.get(inv.product_id)
         if p:
             s_data = sales_map.get(p.id, {'sum_90': 0, 'sum_120': 0, 'sum_150': 0, 'sum_180': 0})
@@ -351,9 +370,9 @@ def _recalculate_abc_ranks(target_company='IKUJI', base_date=None, sales_cutoff_
                 
     Product.objects.bulk_update(p_dict.values(), ['abc_rank'])
 
-def _execute_single_order_plan(product, inventory, base_date, future_end_date, sales_map_select, sales_map_ikuji, ship_map, arr_map, existing_order_map=None):
+def _execute_single_order_plan(product, inventory, base_date, future_end_date, sales_map_select, sales_map_ikuji, ship_map, arr_map, existing_order_map=None, target_company='IKUJI'):
     pid = product.id
-    sales_data = sales_map_select.get(pid, {'sum_30': 0, 'sum_long': 0}) if product.demand_source == 'SELECT' else sales_map_ikuji.get(pid, {'sum_30': 0, 'sum_long': 0})
+    sales_data = sales_map_select.get(pid, {'sum_30': 0, 'sum_long': 0}) if target_company == 'SELECT' else sales_map_ikuji.get(pid, {'sum_30': 0, 'sum_long': 0})
     tdays = product.trend_days if product.trend_days in [90, 120, 150, 180] else 90
     effective_long_days = sales_data.get('effective_long', tdays) or tdays
     effective_30_days = sales_data.get('effective_30', 30) or 30
@@ -427,7 +446,6 @@ def _execute_single_order_plan(product, inventory, base_date, future_end_date, s
 def planning_dashboard(request):
     current_company = request.GET.get('current_company', 'IKUJI')
     if current_company not in ['IKUJI', 'SELECT']: current_company = 'IKUJI'
-    if current_company == 'SELECT': Product.objects.filter(owner_company='SELECT', demand_source='IKUJI').update(demand_source='SELECT')
     requested_stock_base_date = _parse_stock_base_date(request.GET.get('stock_base_date'))
     stock_base_date = _get_stock_base_date(current_company, requested_stock_base_date)
     base_date = _get_planning_base_date(current_company, stock_base_date)
@@ -444,13 +462,17 @@ def planning_dashboard(request):
     abc_filter = request.GET.get('abc_filter', '').strip()
     supplier_code = request.GET.get('supplier_code', '').strip()
     show_discontinued = request.GET.get('show_discontinued') == '1'
-    planning_product_ids = list(Product.objects.filter(owner_company=current_company).values_list('id', flat=True))
+    planning_product_ids = list(_company_relevant_product_ids(current_company))
+    existing_inventory_ids = set(Inventory.objects.filter(product_id__in=planning_product_ids).values_list('product_id', flat=True))
+    missing_inventory_ids = [pid for pid in planning_product_ids if pid not in existing_inventory_ids]
+    if missing_inventory_ids:
+        Inventory.objects.bulk_create([Inventory(product_id=pid) for pid in missing_inventory_ids], ignore_conflicts=True)
     stockout_windows = [30, 45, 60, 75, 90, 120, 150, 180, months_val * 30]
     adjusted_windows = _build_adjusted_sales_windows(planning_product_ids, sales_cutoff_date, stockout_windows)
     sales_map_ikuji, sales_map_select = _build_adjusted_sales_maps(planning_product_ids, sales_cutoff_date, stockout_windows, adjusted_windows)
     for item in list(sales_map_ikuji.values()) + list(sales_map_select.values()):
         item['sum_long'] = item.get(f'sum_{months_val * 30}', 0)
-    inventories = Inventory.objects.select_related('product').filter(product__is_excluded=False, product__owner_company=current_company).order_by('product__code')
+    inventories = Inventory.objects.select_related('product').filter(product__is_excluded=False, product_id__in=planning_product_ids).order_by('product__code')
     if not show_discontinued:
         inventories = inventories.filter(product__is_discontinued=False)
     if abc_filter in ['A', 'B', 'C', 'DEAD']: inventories = inventories.filter(product__abc_rank=abc_filter)
@@ -481,7 +503,7 @@ def planning_dashboard(request):
     arrivals = ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date)
     arr_map = _build_arrival_map(arrivals)
     active_orders = Order.objects.select_related('product').filter(
-        product__owner_company=current_company,
+        product_id__in=planning_product_ids,
     ).order_by('order_date', 'created_at')
     planned_order_map = _build_order_arrival_map(
         active_orders.filter(status__in=['計画中', '発注済'], expected_arrival_date__gte=base_date, expected_arrival_date__lte=future_end_date)
@@ -498,12 +520,12 @@ def planning_dashboard(request):
         elif current_company == 'SELECT' and rec.warehouse_id in shared_wh_ids:
             cross_company_wh_stock.setdefault(rec.product.code, {})[rec.warehouse_id] = rec.quantity
             cross_company_stock[rec.product.code] = cross_company_stock.get(rec.product.code, 0) + rec.quantity
-    all_inventories_for_kpi = Inventory.objects.select_related('product').filter(product__is_excluded=False, product__owner_company=current_company)
+    all_inventories_for_kpi = Inventory.objects.select_related('product').filter(product__is_excluded=False, product_id__in=planning_product_ids)
     if not show_discontinued:
         all_inventories_for_kpi = all_inventories_for_kpi.filter(product__is_discontinued=False)
     for k_item in all_inventories_for_kpi:
         k_pid = k_item.product.id
-        k_sales = sales_map_select.get(k_pid, _default_sales_data(k_pid, adjusted_windows)) if k_item.product.demand_source == 'SELECT' else sales_map_ikuji.get(k_pid, _default_sales_data(k_pid, adjusted_windows))
+        k_sales = sales_map_select.get(k_pid, _default_sales_data(k_pid, adjusted_windows)) if current_company == 'SELECT' else sales_map_ikuji.get(k_pid, _default_sales_data(k_pid, adjusted_windows))
         k_tdays = k_item.product.trend_days if k_item.product.trend_days in [90, 120, 150, 180] else 90
         k_effective_long = k_sales.get(f'effective_{k_tdays}', k_tdays)
         k_effective_30 = k_sales.get('effective_30', 30)
@@ -534,7 +556,7 @@ def planning_dashboard(request):
         stockout_periods_map.setdefault(period.product_id, []).append(period)
     for item in page_obj:
         pid = item.product.id; pcode = item.product.code
-        sales_data = sales_map_select.get(pid, _default_sales_data(pid, adjusted_windows)) if item.product.demand_source == 'SELECT' else sales_map_ikuji.get(pid, _default_sales_data(pid, adjusted_windows))
+        sales_data = sales_map_select.get(pid, _default_sales_data(pid, adjusted_windows)) if current_company == 'SELECT' else sales_map_ikuji.get(pid, _default_sales_data(pid, adjusted_windows))
         item.demand_30 = round(sales_data['sum_30'], 1)
         item.mid_days = (item.product.trend_days if item.product.trend_days in [90, 120, 150, 180] else 90) // 2
         item.demand_mid = round((sales_data.get(f'sum_{item.mid_days}', 0) or 0) * 30 / (sales_data.get(f'effective_{item.mid_days}', item.mid_days) or item.mid_days), 1)
@@ -613,7 +635,7 @@ def product_master_dashboard(request):
     show_discontinued = request.GET.get('show_discontinued') == '1'
     product_sort = request.GET.get('product_sort', 'code')
     product_order = request.GET.get('product_order', 'asc')
-    products = Product.objects.filter(owner_company=current_company)
+    products = Product.objects.all()
     if not show_discontinued:
         products = products.filter(is_discontinued=False)
     if product_prefix:
@@ -680,7 +702,7 @@ def arrivals_dashboard(request):
     if current_company not in ['IKUJI', 'SELECT']:
         current_company = 'IKUJI'
     search_query = request.GET.get('search_query', '').strip()
-    arrivals = ArrivalSchedule.objects.select_related('product').filter(product__owner_company=current_company).order_by('arrival_date', 'product__code', 'status')
+    arrivals = ArrivalSchedule.objects.select_related('product').all().order_by('arrival_date', 'product__code', 'status')
     if search_query:
         arrivals = arrivals.filter(Q(product__code__icontains=search_query) | Q(product__name__icontains=search_query))
     paginator = Paginator(arrivals, 100)
@@ -960,7 +982,8 @@ def update_product_config(request, product_id):
         product.is_excluded = 'is_excluded' in request.POST
         product.is_discontinued = 'is_discontinued' in request.POST
         product.allow_dead_order = 'allow_dead_order' in request.POST
-        product.demand_source = request.POST.get('demand_source', product.owner_company)
+        if 'demand_source' in request.POST:
+            product.demand_source = request.POST.get('demand_source', product.demand_source)
         product.save()
         inventory, _ = Inventory.objects.get_or_create(product=product)
         inventory.safety_stock = int(request.POST.get('safety_stock', '20'))
@@ -976,7 +999,7 @@ def bulk_update_products(request):
     if current_company not in ['IKUJI', 'SELECT']:
         current_company = 'IKUJI'
     product_ids = [pid for pid in request.POST.getlist('product_ids') if str(pid).isdigit()]
-    products = Product.objects.filter(id__in=product_ids, owner_company=current_company)
+    products = Product.objects.filter(id__in=product_ids)
     update_fields = []
     try:
         if not product_ids:
@@ -999,9 +1022,6 @@ def bulk_update_products(request):
         if 'bulk_lot_rule_enabled' in request.POST:
             product_updates['lot_rule'] = request.POST.get('bulk_lot_rule', 'ROUND_UP_LOT')
             update_fields.append('超過ルール')
-        if 'bulk_demand_source_enabled' in request.POST:
-            product_updates['demand_source'] = request.POST.get('bulk_demand_source', current_company)
-            update_fields.append('需要参照元')
         if 'bulk_is_excluded_enabled' in request.POST:
             product_updates['is_excluded'] = request.POST.get('bulk_is_excluded') == 'true'
             update_fields.append('管理外')
@@ -1079,7 +1099,7 @@ def create_arrival_schedule(request):
     current_company = request.POST.get('current_company', 'IKUJI')
     try:
         code = _normalize_product_code(request.POST.get('商品コード') or request.POST.get('product_code'))
-        product = Product.objects.get(code=code, owner_company=current_company)
+        product = Product.objects.get(code=code)
         arrival_date = _parse_csv_date(request.POST.get('arrival_date'))
         quantity, quantity_error = _parse_csv_quantity(request.POST.get('quantity'))
         status = request.POST.get('status', '確定')
@@ -1124,7 +1144,7 @@ def create_shipment_schedule(request, product_id):
     current_company = request.POST.get('current_company', 'IKUJI')
     if current_company not in ['IKUJI', 'SELECT']:
         current_company = 'IKUJI'
-    product = get_object_or_404(Product, id=product_id, owner_company=current_company)
+    product = get_object_or_404(Product, id=product_id)
     try:
         shipment_date = datetime.datetime.strptime(request.POST.get('shipment_date', ''), '%Y-%m-%d').date()
         destination = (request.POST.get('destination') or '').strip()
@@ -1149,7 +1169,7 @@ def delete_shipment_schedule(request, shipment_id):
     current_company = request.POST.get('current_company', 'IKUJI')
     if current_company not in ['IKUJI', 'SELECT']:
         current_company = 'IKUJI'
-    shipment = get_object_or_404(ShipmentSchedule, id=shipment_id, product__owner_company=current_company)
+    shipment = get_object_or_404(ShipmentSchedule, id=shipment_id)
     product_code = shipment.product.code
     shipment.delete()
     messages.info(request, f"商品［{product_code}］の先付け受注を削除しました。")
@@ -1160,7 +1180,7 @@ def create_stockout_period(request, product_id):
     current_company = request.POST.get('current_company', 'IKUJI')
     if current_company not in ['IKUJI', 'SELECT']:
         current_company = 'IKUJI'
-    product = get_object_or_404(Product, id=product_id, owner_company=current_company)
+    product = get_object_or_404(Product, id=product_id)
     try:
         start_date = datetime.datetime.strptime(request.POST.get('start_date', ''), '%Y-%m-%d').date()
         end_date = datetime.datetime.strptime(request.POST.get('end_date', ''), '%Y-%m-%d').date()
@@ -1178,7 +1198,7 @@ def delete_stockout_period(request, period_id):
     current_company = request.POST.get('current_company', 'IKUJI')
     if current_company not in ['IKUJI', 'SELECT']:
         current_company = 'IKUJI'
-    period = get_object_or_404(ProductStockoutPeriod, id=period_id, product__owner_company=current_company)
+    period = get_object_or_404(ProductStockoutPeriod, id=period_id)
     product_code = period.product.code
     period.delete()
     messages.info(request, f"商品［{product_code}］の欠品期間を削除しました。")
@@ -1186,9 +1206,12 @@ def delete_stockout_period(request, period_id):
 
 @require_POST
 def create_order_plan(request, product_id):
+    current_company = request.POST.get('current_company', 'IKUJI')
+    if current_company not in ['IKUJI', 'SELECT']:
+        current_company = 'IKUJI'
     product = get_object_or_404(Product, id=product_id); inventory = Inventory.objects.get(product=product)
-    stock_base_date = _get_stock_base_date(product.owner_company, _parse_stock_base_date(request.POST.get('stock_base_date')))
-    base_date = _get_planning_base_date(product.owner_company, stock_base_date); future_end_date = base_date + timedelta(days=120)
+    stock_base_date = _get_stock_base_date(current_company, _parse_stock_base_date(request.POST.get('stock_base_date')))
+    base_date = _get_planning_base_date(current_company, stock_base_date); future_end_date = base_date + timedelta(days=120)
     sales_cutoff_date = stock_base_date or base_date
     trend_days = product.trend_days if product.trend_days in [90, 120, 150, 180] else 90
     adjusted_windows = _build_adjusted_sales_windows([product.id], sales_cutoff_date, [30, trend_days])
@@ -1199,7 +1222,7 @@ def create_order_plan(request, product_id):
     ship_map = {s['product_id']: {s['shipment_date']: s['total']} for s in ShipmentSchedule.objects.filter(shipment_date__gte=base_date, shipment_date__lte=future_end_date).values('product_id', 'shipment_date').annotate(total=Sum('quantity'))}
     arr_map = _build_arrival_map(ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date))
     existing_order_map = _build_order_arrival_map(Order.objects.filter(product=product, status__in=['計画中', '発注済']))
-    created_count = _execute_single_order_plan(product, inventory, base_date, future_end_date, s_map_select, s_map_ikuji, ship_map, arr_map, existing_order_map)
+    created_count = _execute_single_order_plan(product, inventory, base_date, future_end_date, s_map_select, s_map_ikuji, ship_map, arr_map, existing_order_map, target_company=current_company)
     if created_count: messages.success(request, f"商品［{product.code}］の発注計画を {created_count} 件作成しました。")
     else: messages.info(request, "発注基準を満たしていないためスキップしました。")
     return redirect(request.META.get('HTTP_REFERER', 'planning_dashboard'))
@@ -1213,7 +1236,7 @@ def bulk_create_order_plan(request):
     stock_base_date = _get_stock_base_date(current_company, _parse_stock_base_date(request.POST.get('stock_base_date')))
     base_date = _get_planning_base_date(current_company, stock_base_date); future_end_date = base_date + timedelta(days=120)
     sales_cutoff_date = stock_base_date or base_date
-    products = list(Product.objects.filter(id__in=selected_pids, owner_company=current_company))
+    products = list(Product.objects.filter(id__in=selected_pids))
     if not products:
         messages.warning(request, "選択した商品は現在の会社の発注対象ではありません。")
         return redirect('/?current_company=' + current_company)
@@ -1237,7 +1260,7 @@ def bulk_create_order_plan(request):
     for p in products:
         inv = inventories.get(p.id)
         if inv:
-            created_count += _execute_single_order_plan(p, inv, base_date, future_end_date, s_map_select, s_map_ikuji, ship_map, arr_map, existing_order_map)
+            created_count += _execute_single_order_plan(p, inv, base_date, future_end_date, s_map_select, s_map_ikuji, ship_map, arr_map, existing_order_map, target_company=current_company)
     messages.success(request, f"一括発注計算完了！（{created_count}件の計画を新規生成）")
     return redirect('/?current_company=' + current_company)
 
@@ -1277,7 +1300,7 @@ def import_inventory_csv(request):
                     warehouse.is_active = True
                     warehouse.save(update_fields=['is_active'])
                 wh_map[source_warehouse_name] = warehouse
-            products = {p.code: p for p in Product.objects.filter(owner_company=current_company)}
+            products = {p.code: p for p in Product.objects.all()}
             try: selected_date = datetime.datetime.strptime(request.POST.get('inventory_date', ''), '%Y-%m-%d').date()
             except: selected_date = datetime.date.today()
             row_count, unknown_count, quantity_error_count = 0, 0, 0
@@ -1537,11 +1560,11 @@ def product_list(request): return render(request, 'inventory/product_list.html',
 def export_products_csv(request):
     cc = request.GET.get('current_company', 'IKUJI'); res = HttpResponse(content_type='text/csv'); res['Content-Disposition'] = f'attachment; filename="products_{cc}.csv"'
     buf = io.StringIO(); writer = csv.writer(buf); writer.writerow(['商品コード', '商品名', '標準原価', '仕入先名', 'リードタイム', '発注ロット', '超過時ルール', '長期トレンド日数', '管理外フラグ', '廃盤フラグ'])
-    for p in Product.objects.filter(owner_company=cc): writer.writerow([p.code, p.name, p.price, p.supplier, p.lead_time, p.order_lot, p.lot_rule, p.trend_days, p.is_excluded, p.is_discontinued])
+    for p in Product.objects.all().order_by('code'): writer.writerow([p.code, p.name, p.price, p.supplier, p.lead_time, p.order_lot, p.lot_rule, p.trend_days, p.is_excluded, p.is_discontinued])
     res.write(buf.getvalue().encode('cp932', errors='replace')); return res
 
 def export_inventory_csv(request):
-    cc = request.GET.get('current_company', 'IKUJI'); whs = Warehouse.objects.filter(owner_company=cc, is_active=True); invs = Inventory.objects.select_related('product').filter(product__owner_company=cc)
+    cc = request.GET.get('current_company', 'IKUJI'); whs = Warehouse.objects.filter(owner_company=cc, is_active=True); product_ids = _company_relevant_product_ids(cc); invs = Inventory.objects.select_related('product').filter(product_id__in=product_ids)
     w_map = {}
     for r in WarehouseInventory.objects.filter(warehouse__owner_company=cc, warehouse__is_active=True): w_map.setdefault(r.product_id, {})[r.warehouse_id] = r.quantity
     res = HttpResponse(content_type='text/csv'); res['Content-Disposition'] = f'attachment; filename="inventory_{cc}.csv"'
@@ -1561,7 +1584,7 @@ def export_sales_csv(request):
 def export_arrivals_csv(request):
     cc = request.GET.get('current_company', 'IKUJI'); res = HttpResponse(content_type='text/csv'); res['Content-Disposition'] = f'attachment; filename="arrivals_{cc}.csv"'
     buf = io.StringIO(); writer = csv.writer(buf); writer.writerow(['商品コード', '商品名', '入荷予定日', '入荷予定数量', '確度ステータス'])
-    for a in ArrivalSchedule.objects.select_related('product').filter(product__owner_company=cc): writer.writerow([a.product.code, a.product.name, a.arrival_date.strftime('%Y/%m/%d'), a.quantity, a.status])
+    for a in ArrivalSchedule.objects.select_related('product').all().order_by('arrival_date', 'product__code', 'status'): writer.writerow([a.product.code, a.product.name, a.arrival_date.strftime('%Y/%m/%d'), a.quantity, a.status])
     res.write(buf.getvalue().encode('cp932', errors='replace')); return res
 
 def export_stockout_periods_csv(request):
@@ -1574,7 +1597,7 @@ def export_stockout_periods_csv(request):
     writer = csv.writer(buf)
     writer.writerow(['商品コード', '商品名', '欠品開始日', '欠品終了日', '欠品日数', 'メモ'])
     periods = ProductStockoutPeriod.objects.select_related('product').filter(
-        product__owner_company=cc,
+        product_id__in=_company_relevant_product_ids(cc),
     ).order_by('product__code', '-start_date', '-end_date')
     for period in periods:
         writer.writerow([
@@ -1665,7 +1688,7 @@ def product_sales_chart_data(request, product_id):
 
 def _order_plan_export_rows(current_company):
     return Order.objects.select_related('product').filter(
-        product__owner_company=current_company,
+        product_id__in=_company_relevant_product_ids(current_company),
     ).order_by('order_date', 'created_at', 'product__code')
 
 def export_order_plans_csv(request):

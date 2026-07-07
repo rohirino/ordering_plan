@@ -143,6 +143,7 @@ def import_product_rows(rows, current_company='IKUJI', dry_run=False):
             continue
 
         if not dry_run:
+            existing_product = Product.objects.filter(code=product_data['code']).first()
             defaults = {
                 'name': product_data['name'],
                 'price': product_data['price'],
@@ -152,9 +153,10 @@ def import_product_rows(rows, current_company='IKUJI', dry_run=False):
                 'lot_rule': product_data['lot_rule'],
                 'trend_days': product_data['trend_days'],
                 'is_excluded': product_data['is_excluded'],
-                'owner_company': product_data['owner_company'],
-                'demand_source': product_data['demand_source'],
             }
+            if not existing_product:
+                defaults['owner_company'] = product_data['owner_company']
+                defaults['demand_source'] = product_data['demand_source']
             if 'is_discontinued' in product_data:
                 defaults['is_discontinued'] = product_data['is_discontinued']
             product, _ = Product.objects.update_or_create(

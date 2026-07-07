@@ -60,6 +60,8 @@
         .badge.valuation-updated { background: #e7f5ff; color: #0b5c8f; border: 1px solid #74c0fc; }
         .badge.manual { background: #f1f3f5; color: #495057; border: 1px solid #ced4da; }
         .source-note { display: block; margin-top: 2px; color: #6c757d; font-size: 10px; white-space: nowrap; }
+        .shared-master-note { font-size: 12px; font-weight: bold; color: #495057; background: #fff9db; border: 1px solid #ffe066; border-radius: 5px; padding: 8px 10px; }
+        body.company-select .shared-master-note { background: #e7f5ff; border-color: #74c0fc; }
         .pager { display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 13px; }
         .pagination-controls { flex-wrap: wrap; padding: 4px 0; }
         .pagination-status { font-weight: bold; color: #495057; white-space: nowrap; }
@@ -109,6 +111,7 @@
         <a href="?current_company=IKUJI" class="company-tab {% if current_company == 'IKUJI' %}active{% endif %}">日本育児</a>
         <a href="?current_company=SELECT" class="company-tab {% if current_company == 'SELECT' %}active{% endif %}">ペットセレクト</a>
     </div>
+    <div class="shared-master-note">商品コード・商品名・発注パラメータは両社共通です。会社切替は画面色、販売履歴、実在庫、棚卸資産評価の表示対象を切り替えます。</div>
 
     {% if messages %}
     <div class="messages">
@@ -134,7 +137,6 @@
                 <option value="order_interval_days" {% if product_sort == 'order_interval_days' %}selected{% endif %}>発注間隔</option>
                 <option value="safety_stock" {% if product_sort == 'safety_stock' %}selected{% endif %}>安全在庫</option>
                 <option value="trend_days" {% if product_sort == 'trend_days' %}selected{% endif %}>長期ベース</option>
-                <option value="demand_source" {% if product_sort == 'demand_source' %}selected{% endif %}>需要参照元</option>
                 <option value="discontinued" {% if product_sort == 'discontinued' %}selected{% endif %}>廃盤</option>
             </select>
             <select name="product_order">
@@ -168,7 +170,6 @@
             <input type="number" name="safety_stock" value="20" class="num-small" min="0">
             <select name="trend_days">{% for value, label in trend_days_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
             <select name="lot_rule">{% for value, label in lot_rule_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
-            <select name="demand_source">{% for value, label in company_choices %}<option value="{{ value }}" {% if value == current_company %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
             <label style="font-size: 12px; font-weight: bold; display: flex; align-items: center; gap: 4px;"><input type="checkbox" name="is_discontinued">廃盤</label>
             <button type="submit" class="primary">新規登録</button>
         </form>
@@ -186,7 +187,6 @@
                 <label class="bulk-item"><input type="checkbox" name="bulk_safety_stock_enabled">安全在庫<input type="number" name="bulk_safety_stock" value="20" min="0"></label>
                 <label class="bulk-item"><input type="checkbox" name="bulk_trend_days_enabled">長期ベース<select name="bulk_trend_days">{% for value, label in trend_days_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
                 <label class="bulk-item"><input type="checkbox" name="bulk_lot_rule_enabled">超過ルール<select name="bulk_lot_rule">{% for value, label in lot_rule_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
-                <label class="bulk-item"><input type="checkbox" name="bulk_demand_source_enabled">需要参照元<select name="bulk_demand_source">{% for value, label in company_choices %}<option value="{{ value }}" {% if value == current_company %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
                 <label class="bulk-item"><input type="checkbox" name="bulk_is_excluded_enabled">管理外<select name="bulk_is_excluded"><option value="false">OFF</option><option value="true">ON</option></select></label>
                 <label class="bulk-item"><input type="checkbox" name="bulk_is_discontinued_enabled">廃盤<select name="bulk_is_discontinued"><option value="false">OFF</option><option value="true">ON</option></select></label>
                 <label class="bulk-item"><input type="checkbox" name="bulk_allow_dead_order_enabled">処分品発注<select name="bulk_allow_dead_order"><option value="false">OFF</option><option value="true">ON</option></select></label>
@@ -262,7 +262,7 @@
         <table>
             <thead>
                 <tr>
-                    <th>選択</th><th>保存</th><th>商品コード</th><th>商品名</th><th>登録由来</th><th>原価</th><th>仕入先</th><th>LT</th><th>ロット</th><th>発注間隔</th><th>安全在庫</th><th>長期ベース</th><th>超過ルール</th><th>需要参照元</th><th>管理外</th><th>廃盤</th><th>処分品発注</th><th>削除</th>
+                    <th>選択</th><th>保存</th><th>商品コード</th><th>商品名</th><th>登録由来</th><th>原価</th><th>仕入先</th><th>LT</th><th>ロット</th><th>発注間隔</th><th>安全在庫</th><th>長期ベース</th><th>超過ルール</th><th>管理外</th><th>廃盤</th><th>処分品発注</th><th>削除</th>
                 </tr>
             </thead>
             <tbody>
@@ -299,7 +299,6 @@
                     <td><input form="productForm{{ product.id }}" type="number" name="safety_stock" value="{{ product.safety_stock }}" class="num-small" min="0"></td>
                     <td><select form="productForm{{ product.id }}" name="trend_days" class="select-mid">{% for value, label in trend_days_choices %}<option value="{{ value }}" {% if product.trend_days == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
                     <td><select form="productForm{{ product.id }}" name="lot_rule" class="select-mid">{% for value, label in lot_rule_choices %}<option value="{{ value }}" {% if product.lot_rule == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
-                    <td><select form="productForm{{ product.id }}" name="demand_source" class="select-mid">{% for value, label in company_choices %}<option value="{{ value }}" {% if product.demand_source == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
                     <td class="check-cell"><input form="productForm{{ product.id }}" type="checkbox" name="is_excluded" {% if product.is_excluded %}checked{% endif %}></td>
                     <td class="check-cell"><input form="productForm{{ product.id }}" type="checkbox" name="is_discontinued" {% if product.is_discontinued %}checked{% endif %}></td>
                     <td class="check-cell"><input form="productForm{{ product.id }}" type="checkbox" name="allow_dead_order" {% if product.allow_dead_order %}checked{% endif %}></td>

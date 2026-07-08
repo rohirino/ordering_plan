@@ -182,9 +182,9 @@
         </div>
 
         <div style="display: flex; gap: 10px; margin-bottom: 6px;">
-            <a href="?current_company={{ current_company }}&risk_filter=shortage&active_filter={{ active_filter }}&active_months={{ active_months }}{% if show_discontinued %}&show_discontinued=1{% endif %}" style="background-color: #fff5f5; border: 1px solid #ffc9c9; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #e03131; text-decoration: none; {% if risk_filter == 'shortage' %}box-shadow: 0 0 0 2px #e03131 inset;{% endif %}">🚨 会社全体の欠品リスク：{{ kpi_shortage_cnt }} 品番</a>
-            <a href="?current_company={{ current_company }}&risk_filter=order_point&active_filter={{ active_filter }}&active_months={{ active_months }}{% if show_discontinued %}&show_discontinued=1{% endif %}" style="background-color: #fff9e6; border: 1px solid #ffeeba; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #b58100; text-decoration: none; {% if risk_filter == 'order_point' %}box-shadow: 0 0 0 2px #b58100 inset;{% endif %}">⚠️ 会社全体の発注点割れ：{{ kpi_order_point_cnt }} 品番</a>
-            {% if risk_filter %}<a href="?current_company={{ current_company }}&active_filter={{ active_filter }}&active_months={{ active_months }}{% if show_discontinued %}&show_discontinued=1{% endif %}" style="background:#fff; border:1px solid #ced4da; padding:4px 10px; border-radius:4px; font-size:11px; font-weight:bold; color:#495057; text-decoration:none;">リスク絞込解除</a>{% endif %}
+            <a href="?current_company={{ current_company }}&risk_filter=shortage&active_filter={{ active_filter }}&active_months={{ active_months }}{% if show_discontinued %}&show_discontinued=1{% endif %}{% if pet_sales_filter %}&pet_sales_filter={{ pet_sales_filter }}{% endif %}" style="background-color: #fff5f5; border: 1px solid #ffc9c9; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #e03131; text-decoration: none; {% if risk_filter == 'shortage' %}box-shadow: 0 0 0 2px #e03131 inset;{% endif %}">🚨 会社全体の欠品リスク：{{ kpi_shortage_cnt }} 品番</a>
+            <a href="?current_company={{ current_company }}&risk_filter=order_point&active_filter={{ active_filter }}&active_months={{ active_months }}{% if show_discontinued %}&show_discontinued=1{% endif %}{% if pet_sales_filter %}&pet_sales_filter={{ pet_sales_filter }}{% endif %}" style="background-color: #fff9e6; border: 1px solid #ffeeba; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #b58100; text-decoration: none; {% if risk_filter == 'order_point' %}box-shadow: 0 0 0 2px #b58100 inset;{% endif %}">⚠️ 会社全体の発注点割れ：{{ kpi_order_point_cnt }} 品番</a>
+            {% if risk_filter %}<a href="?current_company={{ current_company }}&active_filter={{ active_filter }}&active_months={{ active_months }}{% if show_discontinued %}&show_discontinued=1{% endif %}{% if pet_sales_filter %}&pet_sales_filter={{ pet_sales_filter }}{% endif %}" style="background:#fff; border:1px solid #ced4da; padding:4px 10px; border-radius:4px; font-size:11px; font-weight:bold; color:#495057; text-decoration:none;">リスク絞込解除</a>{% endif %}
         </div>
         
         {% if messages %}
@@ -248,6 +248,11 @@
                 <label style="font-size: 12px; color: #495057; font-weight: bold; display: flex; align-items: center; gap: 4px;">
                     <input type="checkbox" name="show_discontinued" value="1" {% if show_discontinued %}checked{% endif %} onchange="this.form.submit();"> 廃盤も表示
                 </label>
+                {% if current_company == 'IKUJI' %}
+                <label style="font-size: 12px; color: #1864ab; font-weight: bold; display: flex; align-items: center; gap: 4px;">
+                    <input type="checkbox" name="pet_sales_filter" value="exclude" {% if pet_sales_filter == 'exclude' %}checked{% endif %} onchange="this.form.submit();"> ペット売上有を除外
+                </label>
+                {% endif %}
                 <div style="font-size: 12px; color: #495057;"><span style="font-weight: bold; color: #212529;">📊 クラス：</span>
                     <select name="abc_filter" class="inline-input" style="padding: 2px 6px; border-radius: 4px; background: white;" onchange="this.form.submit();">
                         <option value="">全てのクラス</option>
@@ -270,7 +275,7 @@
                 {% endif %}
                 <div>
                     <button type="submit" style="background-color: #495057; color: white; border: none; padding: 3px 10px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 11px;">実行</button>
-                    {% if search_query or supplier_code or abc_filter or active_months != '12' or active_filter != 'active' or shared_wh_ids or show_discontinued or risk_filter %}
+                    {% if search_query or supplier_code or abc_filter or active_months != '12' or active_filter != 'active' or shared_wh_ids or show_discontinued or risk_filter or pet_sales_filter %}
                         <a href="/?current_company={{ current_company }}" style="margin-left: 8px; font-size: 11px; color: #6c757d; text-decoration: none; font-weight: bold;">✕ クリア</a>
                     {% endif %}
                 </div>

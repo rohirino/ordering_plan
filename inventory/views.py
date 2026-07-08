@@ -463,6 +463,9 @@ def planning_dashboard(request):
     risk_filter = request.GET.get('risk_filter', '').strip()
     if risk_filter not in ['shortage', 'order_point']:
         risk_filter = ''
+    pet_sales_filter = request.GET.get('pet_sales_filter', '').strip()
+    if current_company != 'IKUJI' or pet_sales_filter != 'exclude':
+        pet_sales_filter = ''
     supplier_code = request.GET.get('supplier_code', '').strip()
     show_discontinued = request.GET.get('show_discontinued') == '1'
     planning_product_ids = list(_company_relevant_product_ids(current_company))
@@ -475,9 +478,19 @@ def planning_dashboard(request):
     sales_map_ikuji, sales_map_select = _build_adjusted_sales_maps(planning_product_ids, sales_cutoff_date, stockout_windows, adjusted_windows)
     for item in list(sales_map_ikuji.values()) + list(sales_map_select.values()):
         item['sum_long'] = item.get(f'sum_{months_val * 30}', 0)
+    select_sales_product_ids_all = set()
+    if current_company == 'IKUJI':
+        select_sales_product_ids_all = set(
+            SalesHistory.objects.filter(
+                product_id__in=planning_product_ids,
+                company='SELECT',
+            ).values_list('product_id', flat=True).distinct()
+        )
     inventories = Inventory.objects.select_related('product').filter(product__is_excluded=False, product_id__in=planning_product_ids).order_by('product__code')
     if not show_discontinued:
         inventories = inventories.filter(product__is_discontinued=False)
+    if pet_sales_filter == 'exclude':
+        inventories = inventories.exclude(product_id__in=select_sales_product_ids_all)
     if abc_filter in ['A', 'B', 'C', 'DEAD']: inventories = inventories.filter(product__abc_rank=abc_filter)
     if supplier_code: inventories = inventories.filter(product__code__startswith=supplier_code)
     if search_query: inventories = inventories.filter(Q(product__code__icontains=search_query) | Q(product__name__icontains=search_query))
@@ -556,14 +569,7 @@ def planning_dashboard(request):
     except PageNotAnInteger: page_obj = paginator.page(1)
     except EmptyPage: page_obj = paginator.page(paginator.num_pages)
     visible_product_ids = [item.product_id for item in page_obj]
-    select_sales_product_ids = set()
-    if current_company == 'IKUJI' and visible_product_ids:
-        select_sales_product_ids = set(
-            SalesHistory.objects.filter(
-                product_id__in=visible_product_ids,
-                company='SELECT',
-            ).values_list('product_id', flat=True).distinct()
-        )
+    select_sales_product_ids = select_sales_product_ids_all.intersection(visible_product_ids)
     inventory_date_choices = []
     current_target = datetime.date.today().replace(day=1)
     for _ in range(4):
@@ -636,6 +642,7 @@ def planning_dashboard(request):
         'inventory_date_choices': inventory_date_choices, 'active_orders': active_orders,
         'abc_filter': abc_filter, 'supplier_code': supplier_code,
         'risk_filter': risk_filter,
+        'pet_sales_filter': pet_sales_filter,
         'show_discontinued': show_discontinued, 'current_company': current_company,
         'stock_base_date': stock_base_date, 'base_date': base_date,
         'stock_base_date_param': stock_base_date.strftime('%Y-%m-%d') if stock_base_date else '',

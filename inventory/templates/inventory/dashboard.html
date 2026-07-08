@@ -126,15 +126,28 @@
         .import-log-head { display: flex; gap: 8px; flex-wrap: wrap; color: #495057; font-size: 11px; }
         .import-log-summary { margin-top: 3px; font-weight: 700; }
         .import-log-row pre { margin: 5px 0 0; white-space: pre-wrap; font-size: 11px; color: #495057; }
-        .stock-basis-panel { margin: 4px 0; padding: 7px 10px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 12px; }
+        .stock-basis-panel { margin: 4px 0; padding: 7px 10px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; display: grid; grid-template-columns: minmax(360px, 1fr) minmax(420px, 1fr); gap: 10px; align-items: stretch; font-size: 12px; }
+        .stock-basis-info, .stock-basis-upload { min-width: 0; }
+        .stock-basis-info { display: flex; flex-wrap: wrap; gap: 7px 10px; align-items: center; align-content: flex-start; }
+        .stock-basis-upload { display: flex; flex-direction: column; justify-content: center; gap: 6px; border-left: 1px solid #e9ecef; padding-left: 10px; }
         .stock-basis-title { font-weight: 800; color: #212529; }
         .stock-basis-chip { display: inline-flex; gap: 4px; align-items: baseline; padding: 3px 8px; border-radius: 999px; background: #f1f3f5; color: #495057; font-weight: 700; }
         .stock-basis-chip strong { color: #111; font-size: 13px; }
-        .stock-basis-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-left: auto; }
+        .stock-basis-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0; }
         .stock-basis-form input[type="date"], .stock-basis-form input[type="file"] { font-size: 11px; border: 1px solid #ced4da; border-radius: 4px; padding: 3px 5px; background: white; }
         .stock-basis-form button { background-color: #495057; color: white; border: none; padding: 4px 10px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 11px; }
         .stock-basis-template { color: #495057; font-size: 11px; font-weight: 700; text-decoration: none; border: 1px solid #ced4da; border-radius: 4px; padding: 3px 7px; background: #fff; }
-        .stock-basis-note { flex-basis: 100%; margin-top: -2px; padding: 4px 8px; border-left: 4px solid #f08c00; background: #fff9db; color: #5f3dc4; font-size: 11px; line-height: 1.45; }
+        .stock-basis-note { padding: 4px 8px; border-left: 4px solid #f08c00; background: #fff9db; color: #5f3dc4; font-size: 11px; line-height: 1.45; }
+        .order-count-badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; background: #fff5f5; border: 1px solid #ffa8a8; color: #c92a2a; font-weight: 900; }
+        .order-count-badge.has-orders { animation: orderPulse 1.2s ease-in-out infinite; }
+        @keyframes orderPulse {
+            0%, 100% { background: #fff5f5; color: #c92a2a; box-shadow: 0 0 0 rgba(201,42,42,0); }
+            50% { background: #c92a2a; color: #fff; box-shadow: 0 0 8px rgba(201,42,42,0.55); }
+        }
+        @media (max-width: 1100px) {
+            .stock-basis-panel { grid-template-columns: 1fr; }
+            .stock-basis-upload { border-left: 0; border-top: 1px solid #e9ecef; padding-left: 0; padding-top: 8px; }
+        }
     </style>
 </head>
 <body class="{% if current_company == 'IKUJI' %}company-ikuji{% else %}company-select{% endif %}">
@@ -190,24 +203,28 @@
         {% include 'inventory/partials/import_log_panel.html' %}
 
         <div class="stock-basis-panel">
-            <span class="stock-basis-title">試験運用: 実在庫基準</span>
-            <span class="stock-basis-chip">実在庫日 <strong>{% if stock_base_date %}{{ stock_base_date|date:"Y/m/d" }}{% else %}未登録{% endif %}</strong></span>
-            <span class="stock-basis-chip">予測開始 <strong>{{ base_date|date:"Y/m/d" }}</strong></span>
-            <span style="color:#6c757d; font-size:11px;">全倉庫の実在庫を登録し、その翌日から120日間を販売履歴・入荷予定で試算します。</span>
-            <div class="stock-basis-note">
-                注意: CSVに雛形以外の倉庫列がある場合、その倉庫名で発注計画用の倉庫マスタを自動作成します。表記ゆれは別倉庫になり得るため、雛形の倉庫名に合わせてください。
-                例: ニチイク在庫=ﾆﾁｲｸ物流、岸和田在庫=岸和田倉庫、西松屋預託=西松屋。
+            <div class="stock-basis-info">
+                <span class="stock-basis-title">実在庫基準</span>
+                <span class="stock-basis-chip">実在庫日 <strong>{% if stock_base_date %}{{ stock_base_date|date:"Y/m/d" }}{% else %}未登録{% endif %}</strong></span>
+                <span class="stock-basis-chip">予測開始 <strong>{{ base_date|date:"Y/m/d" }}</strong></span>
+                <span style="color:#6c757d; font-size:11px;">全倉庫の実在庫を登録し、その翌日から120日間を販売履歴・入荷予定で計算します。</span>
+                <div class="stock-basis-note">
+                    注意: CSVに雛形以外の倉庫列がある場合、その倉庫名で発注計画用の倉庫マスタを自動作成します。表記ゆれは別倉庫になり得るため、雛形の倉庫名に合わせてください。
+                    例: ニチイク在庫=ﾆﾁｲｸ物流、岸和田在庫=岸和田倉庫、西松屋預託=西松屋。
+                </div>
             </div>
-            <form class="stock-basis-form" method="POST" action="{% url 'import_inventory_csv' %}" enctype="multipart/form-data">
-                {% csrf_token %}
-                <input type="hidden" name="current_company" value="{{ current_company }}">
-                <label style="font-weight:700; color:#495057;">実在庫日
-                    <input type="date" name="inventory_date" value="{% if stock_base_date %}{{ stock_base_date|date:'Y-m-d' }}{% else %}{{ today|date:'Y-m-d' }}{% endif %}" required>
-                </label>
-                <input type="file" name="csv_file" accept=".csv" required>
-                <button type="submit" onclick="return confirm('この会社の全倉庫実在庫をCSV内容で洗替します。実行しますか？');">実在庫CSV登録</button>
-                <a class="stock-basis-template" href="{% url 'download_csv_template' 'inventory' %}?current_company={{ current_company }}">雛形DL</a>
-            </form>
+            <div class="stock-basis-upload">
+                <form class="stock-basis-form" method="POST" action="{% url 'import_inventory_csv' %}" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <input type="hidden" name="current_company" value="{{ current_company }}">
+                    <label style="font-weight:700; color:#495057;">実在庫日
+                        <input type="date" name="inventory_date" value="{% if stock_base_date %}{{ stock_base_date|date:'Y-m-d' }}{% else %}{{ today|date:'Y-m-d' }}{% endif %}" required>
+                    </label>
+                    <input type="file" name="csv_file" accept=".csv" required>
+                    <button type="submit" onclick="return confirm('この会社の全倉庫実在庫をCSV内容で洗替します。実行しますか？');">実在庫CSV登録</button>
+                    <a class="stock-basis-template" href="{% url 'download_csv_template' 'inventory' %}?current_company={{ current_company }}">雛形DL</a>
+                </form>
+            </div>
         </div>
 
         <form method="GET" style="margin-bottom: 4px; background-color: #f1f3f5; padding: 6px 12px; border-radius: 6px; border: 1px solid #dee2e6;">
@@ -291,10 +308,10 @@
             </div>
 
         <button type="button" onclick="toggleOrderPanel()" class="toggle-trigger-btn" style="background-color: #eaf4ff; border-color: #b8daff;">
-            <span id="orderToggleTitle" style="display: flex; align-items: center; gap: 6px; color: #004085;">📦 生成された発注計画の一覧・処理管理 (現在 {{ active_orders|length }} 件)</span>
-            <span id="orderToggleIcon" style="font-size: 12px; color: #004085;">[ クリックで収納 － ]</span>
+            <span id="orderToggleTitle" style="display: flex; align-items: center; gap: 6px; color: #004085;">📦 生成された発注計画の一覧・処理管理 <span class="order-count-badge {% if active_orders|length > 0 %}has-orders{% endif %}">現在 {{ active_orders|length }} 件</span></span>
+            <span id="orderToggleIcon" style="font-size: 12px; color: #004085;">[ クリックで展開 ＋ ]</span>
         </button>
-        <div id="orderFoldPanel" style="display: block; max-height: 90px; overflow-y: auto; background-color: #ffffff; padding: 6px; border-radius: 6px; border: 1px solid #b8daff; margin-bottom: 4px;">
+        <div id="orderFoldPanel" style="display: none; max-height: 90px; overflow-y: auto; background-color: #ffffff; padding: 6px; border-radius: 6px; border: 1px solid #b8daff; margin-bottom: 4px;">
 
             <div style="text-align: right; margin-bottom: 4px;">
                 <button type="button" onclick="printOrderPlanSheet()" style="background-color: #495057; color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;">🖨️ この一覧をA4印刷（アクションボタン除外）</button>

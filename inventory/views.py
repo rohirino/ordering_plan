@@ -460,6 +460,9 @@ def planning_dashboard(request):
     except ValueError: months_val = 12
     search_query = request.GET.get('search_query', '').strip()
     abc_filter = request.GET.get('abc_filter', '').strip()
+    risk_filter = request.GET.get('risk_filter', '').strip()
+    if risk_filter not in ['shortage', 'order_point']:
+        risk_filter = ''
     supplier_code = request.GET.get('supplier_code', '').strip()
     show_discontinued = request.GET.get('show_discontinued') == '1'
     planning_product_ids = list(_company_relevant_product_ids(current_company))
@@ -485,11 +488,6 @@ def planning_dashboard(request):
                 if item['sum_long'] > 0: active_pids.append(pid)
             inventories = inventories.filter(product_id__in=active_pids)
     kpi_shortage_cnt, kpi_order_point_cnt = 0, 0
-    paginator = Paginator(inventories, 50)
-    page_number = request.GET.get('page', 1)
-    try: page_obj = paginator.page(page_number)
-    except PageNotAnInteger: page_obj = paginator.page(1)
-    except EmptyPage: page_obj = paginator.page(paginator.num_pages)
     future_end_date = base_date + timedelta(days=120)
     shipments = ShipmentSchedule.objects.filter(
         shipment_date__gte=base_date,
@@ -523,6 +521,7 @@ def planning_dashboard(request):
     all_inventories_for_kpi = Inventory.objects.select_related('product').filter(product__is_excluded=False, product_id__in=planning_product_ids)
     if not show_discontinued:
         all_inventories_for_kpi = all_inventories_for_kpi.filter(product__is_discontinued=False)
+    shortage_product_ids, order_point_product_ids = set(), set()
     for k_item in all_inventories_for_kpi:
         k_pid = k_item.product.id
         k_sales = sales_map_select.get(k_pid, _default_sales_data(k_pid, adjusted_windows)) if current_company == 'SELECT' else sales_map_ikuji.get(k_pid, _default_sales_data(k_pid, adjusted_windows))
@@ -541,8 +540,30 @@ def planning_dashboard(request):
             if k_stock <= 0: k_has_shortage = True
             elif k_stock <= k_order_point: k_has_op = True
         if k_item.product.abc_rank != 'DEAD' or k_item.product.allow_dead_order:
-            if k_has_shortage: kpi_shortage_cnt += 1
-            elif k_has_op: kpi_order_point_cnt += 1
+            if k_has_shortage:
+                kpi_shortage_cnt += 1
+                shortage_product_ids.add(k_pid)
+            elif k_has_op:
+                kpi_order_point_cnt += 1
+                order_point_product_ids.add(k_pid)
+    if risk_filter == 'shortage':
+        inventories = inventories.filter(product_id__in=shortage_product_ids)
+    elif risk_filter == 'order_point':
+        inventories = inventories.filter(product_id__in=order_point_product_ids)
+    paginator = Paginator(inventories, 50)
+    page_number = request.GET.get('page', 1)
+    try: page_obj = paginator.page(page_number)
+    except PageNotAnInteger: page_obj = paginator.page(1)
+    except EmptyPage: page_obj = paginator.page(paginator.num_pages)
+    visible_product_ids = [item.product_id for item in page_obj]
+    select_sales_product_ids = set()
+    if current_company == 'IKUJI' and visible_product_ids:
+        select_sales_product_ids = set(
+            SalesHistory.objects.filter(
+                product_id__in=visible_product_ids,
+                company='SELECT',
+            ).values_list('product_id', flat=True).distinct()
+        )
     inventory_date_choices = []
     current_target = datetime.date.today().replace(day=1)
     for _ in range(4):
@@ -550,12 +571,12 @@ def planning_dashboard(request):
         inventory_date_choices.append({'value': m_end.strftime('%Y-%m-%d'), 'display': m_end.strftime('%Y年%m月末')})
         current_target = m_end.replace(day=1)
     visible_inventories = []
-    visible_product_ids = [item.product_id for item in page_obj]
     stockout_periods_map = {}
     for period in ProductStockoutPeriod.objects.filter(product_id__in=visible_product_ids).order_by('-start_date', '-end_date'):
         stockout_periods_map.setdefault(period.product_id, []).append(period)
     for item in page_obj:
         pid = item.product.id; pcode = item.product.code
+        item.has_select_sales = current_company == 'IKUJI' and pid in select_sales_product_ids
         sales_data = sales_map_select.get(pid, _default_sales_data(pid, adjusted_windows)) if current_company == 'SELECT' else sales_map_ikuji.get(pid, _default_sales_data(pid, adjusted_windows))
         item.demand_30 = round(sales_data['sum_30'], 1)
         item.mid_days = (item.product.trend_days if item.product.trend_days in [90, 120, 150, 180] else 90) // 2
@@ -614,6 +635,7 @@ def planning_dashboard(request):
         'active_months': active_months, 'search_query': search_query,
         'inventory_date_choices': inventory_date_choices, 'active_orders': active_orders,
         'abc_filter': abc_filter, 'supplier_code': supplier_code,
+        'risk_filter': risk_filter,
         'show_discontinued': show_discontinued, 'current_company': current_company,
         'stock_base_date': stock_base_date, 'base_date': base_date,
         'stock_base_date_param': stock_base_date.strftime('%Y-%m-%d') if stock_base_date else '',

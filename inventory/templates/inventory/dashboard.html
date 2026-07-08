@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>発注計画計画ダッシュボード</title>
+    <title>在庫・発注計画ダッシュボード</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         html, body { margin: 0; padding: 0; height: 100%; font-family: sans-serif; background-color: #fff5f5; overflow: hidden; }
@@ -50,6 +50,7 @@
         .pagination-jump { display: flex; align-items: center; gap: 3px; margin: 0; }
         .pagination-jump input { width: 54px; padding: 4px; border: 1px solid #ced4da; border-radius: 4px; text-align: right; font-size: 12px; }
         .rank-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 12px; font-weight: bold; color: white; }
+        .pet-sales-badge { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 900; color: #fff; background: #1864ab; border: 1px solid #0b4f8a; white-space: nowrap; }
         .company-tab-box { display: flex; gap: 4px; margin-bottom: 8px; border-bottom: 2px solid #dee2e6; padding-bottom: 1px; }
         .company-tab { padding: 6px 20px; border: 1px solid #ced4da; border-bottom: none; background-color: #e9ecef; color: #495057; text-decoration: none; font-size: 13px; font-weight: bold; border-top-left-radius: 4px; border-top-right-radius: 4px; }
         .company-tab.active { background-color: #c92a2a; color: white; border-color: #c92a2a; }
@@ -154,7 +155,7 @@
 
     <div class="fixed-header-area">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-            <h1 style="margin: 0; font-size: 22px;">在庫・発注計画計画ダッシュボード</h1>
+            <h1 style="margin: 0; font-size: 22px;">在庫・発注計画ダッシュボード</h1>
             <div class="header-nav">
                 <div class="header-nav-group">
                     <span class="header-nav-label">Dashboard</span>
@@ -181,8 +182,9 @@
         </div>
 
         <div style="display: flex; gap: 10px; margin-bottom: 6px;">
-            <div style="background-color: #fff5f5; border: 1px solid #ffc9c9; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #e03131;">🚨 会社全体の欠品リスク：{{ kpi_shortage_cnt }} 品番</div>
-            <div style="background-color: #fff9e6; border: 1px solid #ffeeba; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #b58100;">⚠️ 会社全体の発注点割れ：{{ kpi_order_point_cnt }} 品番</div>
+            <a href="?current_company={{ current_company }}&risk_filter=shortage&active_filter={{ active_filter }}&active_months={{ active_months }}{% if show_discontinued %}&show_discontinued=1{% endif %}" style="background-color: #fff5f5; border: 1px solid #ffc9c9; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #e03131; text-decoration: none; {% if risk_filter == 'shortage' %}box-shadow: 0 0 0 2px #e03131 inset;{% endif %}">🚨 会社全体の欠品リスク：{{ kpi_shortage_cnt }} 品番</a>
+            <a href="?current_company={{ current_company }}&risk_filter=order_point&active_filter={{ active_filter }}&active_months={{ active_months }}{% if show_discontinued %}&show_discontinued=1{% endif %}" style="background-color: #fff9e6; border: 1px solid #ffeeba; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #b58100; text-decoration: none; {% if risk_filter == 'order_point' %}box-shadow: 0 0 0 2px #b58100 inset;{% endif %}">⚠️ 会社全体の発注点割れ：{{ kpi_order_point_cnt }} 品番</a>
+            {% if risk_filter %}<a href="?current_company={{ current_company }}&active_filter={{ active_filter }}&active_months={{ active_months }}{% if show_discontinued %}&show_discontinued=1{% endif %}" style="background:#fff; border:1px solid #ced4da; padding:4px 10px; border-radius:4px; font-size:11px; font-weight:bold; color:#495057; text-decoration:none;">リスク絞込解除</a>{% endif %}
         </div>
         
         {% if messages %}
@@ -229,6 +231,7 @@
 
         <form method="GET" style="margin-bottom: 4px; background-color: #f1f3f5; padding: 6px 12px; border-radius: 6px; border: 1px solid #dee2e6;">
             <input type="hidden" name="current_company" value="{{ current_company }}">
+            {% if risk_filter %}<input type="hidden" name="risk_filter" value="{{ risk_filter }}">{% endif %}
             <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
                 <div style="font-size: 12px; color: #495057;"><span style="font-weight: bold; color: #212529;">👁️ 表示対象：</span>
                     <select name="active_filter" class="inline-input" style="padding: 2px 6px; border-radius: 4px; background: white;" onchange="this.form.submit();">
@@ -267,7 +270,7 @@
                 {% endif %}
                 <div>
                     <button type="submit" style="background-color: #495057; color: white; border: none; padding: 3px 10px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 11px;">実行</button>
-                    {% if search_query or supplier_code or abc_filter or active_months != '12' or active_filter != 'active' or shared_wh_ids or show_discontinued %}
+                    {% if search_query or supplier_code or abc_filter or active_months != '12' or active_filter != 'active' or shared_wh_ids or show_discontinued or risk_filter %}
                         <a href="/?current_company={{ current_company }}" style="margin-left: 8px; font-size: 11px; color: #6c757d; text-decoration: none; font-weight: bold;">✕ クリア</a>
                     {% endif %}
                 </div>
@@ -380,6 +383,7 @@
                                 {% elif item.product.abc_rank == 'B' %}<span class="rank-badge" style="background-color: #28a745;">B</span>
                                 {% elif item.product.abc_rank == 'C' %}<span class="rank-badge" style="background-color: #6c757d;">C</span>
                                 {% elif item.product.abc_rank == 'DEAD' %}<span class="rank-badge" style="background-color: #6f42c1; border: 1px solid #563d7c;">処分</span>{% endif %}
+                                {% if item.has_select_sales %}<span class="pet-sales-badge">ペット売上有</span>{% endif %}
                                 <details class="product-config-details">
                                     <summary>★設定</summary>
                                     <div class="config-panel">

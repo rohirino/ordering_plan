@@ -21,6 +21,10 @@
         .company-tab { padding: 7px 18px; border: 1px solid #ced4da; border-bottom: 0; background: #e9ecef; color: #495057; text-decoration: none; font-size: 13px; font-weight: bold; border-radius: 4px 4px 0 0; }
         .company-tab.active { background: #c92a2a; color: #fff; border-color: #c92a2a; }
         body.company-select .company-tab.active { background: #1864ab; border-color: #1864ab; }
+        .master-tabs { display: flex; gap: 4px; border-bottom: 2px solid #dee2e6; margin-top: 2px; }
+        .master-tab { padding: 7px 18px; border: 1px solid #ced4da; border-bottom: 0; background: #f1f3f5; color: #495057; text-decoration: none; font-size: 13px; font-weight: 900; border-radius: 4px 4px 0 0; }
+        .master-tab.active { background: #c92a2a; color: #fff; border-color: #c92a2a; }
+        body.company-select .master-tab.active { background: #1864ab; border-color: #1864ab; }
         .panel { background: #fff; border: 1px solid #ffc9c9; border-radius: 6px; padding: 10px; }
         body.company-select .panel { border-color: #b8daff; }
         .toolbar { display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -127,9 +131,17 @@
     {% endif %}
     {% include 'inventory/partials/import_log_panel.html' %}
 
+    <div class="master-tabs">
+        <a class="master-tab {% if master_tab == 'products' %}active{% endif %}" href="?current_company={{ current_company }}&master_tab=products">商品一覧</a>
+        <a class="master-tab {% if master_tab == 'states' %}active{% endif %}" href="?current_company={{ current_company }}&master_tab=states">状態コードマスタ</a>
+        <a class="master-tab {% if master_tab == 'variants' %}active{% endif %}" href="?current_company={{ current_company }}&master_tab=variants">状態SKU 発注計画反映</a>
+    </div>
+
+    {% if master_tab == 'products' %}
     <div class="panel toolbar">
         <form method="GET" class="inline-form">
             <input type="hidden" name="current_company" value="{{ current_company }}">
+            <input type="hidden" name="master_tab" value="products">
             <input type="text" name="search_query" value="{{ search_query }}" placeholder="コード・商品名・仕入先" style="width: 220px;">
             <input type="text" name="product_prefix" value="{{ product_prefix }}" placeholder="前3桁" maxlength="3" style="width: 58px;">
             <label style="font-size: 12px; font-weight: bold; color: #495057; display: flex; align-items: center; gap: 4px;"><input type="checkbox" name="show_discontinued" value="1" {% if show_discontinued %}checked{% endif %}>廃盤も表示</label>
@@ -205,10 +217,10 @@
             </div>
         </form>
     </div>
+    {% endif %}
 
-    <details class="panel accordion-panel">
-        <summary>状態コードマスタ</summary>
-        <div class="accordion-content state-layout">
+    {% if master_tab == 'states' %}
+    <div class="panel state-layout">
             <div>
                 <form action="{% url 'create_inventory_state' %}" method="POST" class="inline-form" style="margin-bottom: 8px;">
                     {% csrf_token %}
@@ -229,6 +241,7 @@
             <div>
                 <form method="GET" class="inline-form" style="margin-bottom: 8px;">
                     <input type="hidden" name="current_company" value="{{ current_company }}">
+                    <input type="hidden" name="master_tab" value="states">
                     <input type="hidden" name="search_query" value="{{ search_query }}">
                     <input type="hidden" name="product_prefix" value="{{ product_prefix }}">
                     <input type="hidden" name="product_sort" value="{{ product_sort }}">
@@ -236,7 +249,7 @@
                     {% if show_discontinued %}<input type="hidden" name="show_discontinued" value="1">{% endif %}
                     <input type="text" name="state_search_query" value="{{ state_search_query }}" placeholder="状態コード・状態名" style="width: 180px;">
                     <button type="submit" class="primary">状態検索</button>
-                    {% if state_search_query %}<a class="btn" href="?current_company={{ current_company }}&search_query={{ search_query }}&product_prefix={{ product_prefix }}&product_sort={{ product_sort }}&product_order={{ product_order }}{% if show_discontinued %}&show_discontinued=1{% endif %}">解除</a>{% endif %}
+                    {% if state_search_query %}<a class="btn" href="?current_company={{ current_company }}&master_tab=states&search_query={{ search_query }}&product_prefix={{ product_prefix }}&product_sort={{ product_sort }}&product_order={{ product_order }}{% if show_discontinued %}&show_discontinued=1{% endif %}">解除</a>{% endif %}
                     <span style="font-size: 12px; color: #6c757d; font-weight: bold;">表示 {{ inventory_states|length }} / {{ inventory_state_count }} 件</span>
                 </form>
                 <div class="state-list">
@@ -262,12 +275,11 @@
                     </table>
                 </div>
             </div>
-        </div>
-    </details>
+    </div>
+    {% endif %}
 
-    <details class="panel accordion-panel">
-        <summary>状態SKU 発注計画反映</summary>
-        <div class="accordion-content variant-layout">
+    {% if master_tab == 'variants' %}
+    <div class="panel variant-layout">
             <div>
                 <div class="sub-note">
                     棚卸資産評価で作成された「商品コード + 状態コード」単位の在庫を、発注計画の現在庫へ含めるか管理します。B品・保留品・展示品など、資産計上は必要でも販売在庫にしない状態SKUは「除外」にしてください。
@@ -288,6 +300,7 @@
             <div>
                 <form method="GET" class="inline-form" style="margin-bottom: 8px;">
                     <input type="hidden" name="current_company" value="{{ current_company }}">
+                    <input type="hidden" name="master_tab" value="variants">
                     <input type="hidden" name="search_query" value="{{ search_query }}">
                     <input type="hidden" name="product_prefix" value="{{ product_prefix }}">
                     <input type="hidden" name="product_sort" value="{{ product_sort }}">
@@ -312,7 +325,7 @@
                         <option value="desc" {% if variant_master_order == 'desc' %}selected{% endif %}>降順</option>
                     </select>
                     <button type="submit" class="primary">表示</button>
-                    <a class="btn" href="?current_company={{ current_company }}">解除</a>
+                    <a class="btn" href="?current_company={{ current_company }}&master_tab=variants">解除</a>
                     <span style="font-size: 12px; color: #6c757d; font-weight: bold;">表示 {{ variant_rows|length }} / フィルタ結果 {{ variant_count }} 件</span>
                 </form>
                 <div class="variant-list">
@@ -347,9 +360,10 @@
                     </table>
                 </div>
             </div>
-        </div>
-    </details>
+    </div>
+    {% endif %}
 
+    {% if master_tab == 'products' %}
     <div class="table-wrap">
         <table>
             <thead>
@@ -407,6 +421,7 @@
             </tbody>
         </table>
     </div>
+    {% endif %}
 
     {% include 'inventory/partials/pagination.html' %}
 </body>

@@ -711,6 +711,9 @@ def product_master_dashboard(request):
     current_company = request.GET.get('current_company', 'IKUJI')
     if current_company not in ['IKUJI', 'SELECT']:
         current_company = 'IKUJI'
+    master_tab = request.GET.get('master_tab', 'products')
+    if master_tab not in ['products', 'states', 'variants']:
+        master_tab = 'products'
     search_query = request.GET.get('search_query', '').strip()
     state_search_query = request.GET.get('state_search_query', '').strip()
     product_prefix = ''.join(ch for ch in request.GET.get('product_prefix', '').strip() if ch.isdigit())[:3]
@@ -742,16 +745,16 @@ def product_master_dashboard(request):
     if product_order == 'desc':
         sort_field = '-' + sort_field
     products = products.order_by(sort_field, 'code')
-    paginator = Paginator(products, 100)
+    product_paginator = Paginator(products, 100)
     page_number = request.GET.get('page', 1)
     try:
-        page_obj = paginator.page(page_number)
+        product_page_obj = product_paginator.page(page_number)
     except PageNotAnInteger:
-        page_obj = paginator.page(1)
+        product_page_obj = product_paginator.page(1)
     except EmptyPage:
-        page_obj = paginator.page(paginator.num_pages)
+        product_page_obj = product_paginator.page(product_paginator.num_pages)
     product_rows = []
-    for product in page_obj:
+    for product in product_page_obj:
         inventory, _ = Inventory.objects.get_or_create(product=product)
         product.safety_stock = inventory.safety_stock
         product_rows.append(product)
@@ -760,21 +763,42 @@ def product_master_dashboard(request):
         inventory_states = inventory_states.filter(
             Q(state_code__icontains=state_search_query) | Q(state_name__icontains=state_search_query)
         )
+    state_paginator = Paginator(inventory_states, 100)
+    try:
+        state_page_obj = state_paginator.page(page_number)
+    except PageNotAnInteger:
+        state_page_obj = state_paginator.page(1)
+    except EmptyPage:
+        state_page_obj = state_paginator.page(state_paginator.num_pages)
     variant_queryset, variant_filter_context = _product_master_variant_queryset(request.GET)
-    variant_count = variant_queryset.count()
-    variant_rows = variant_queryset[:150]
+    variant_paginator = Paginator(variant_queryset, 100)
+    try:
+        variant_page_obj = variant_paginator.page(page_number)
+    except PageNotAnInteger:
+        variant_page_obj = variant_paginator.page(1)
+    except EmptyPage:
+        variant_page_obj = variant_paginator.page(variant_paginator.num_pages)
+    active_page_obj = product_page_obj
+    if master_tab == 'states':
+        active_page_obj = state_page_obj
+    elif master_tab == 'variants':
+        active_page_obj = variant_page_obj
     return render(request, 'inventory/product_master_dashboard.html', {
         'current_company': current_company,
+        'master_tab': master_tab,
         'search_query': search_query,
         'state_search_query': state_search_query,
         'product_prefix': product_prefix,
         'show_discontinued': show_discontinued,
         'products': product_rows,
-        'inventory_states': inventory_states[:80],
+        'inventory_states': state_page_obj,
         'inventory_state_count': inventory_states.count(),
-        'variant_rows': variant_rows,
-        'variant_count': variant_count,
-        'page_obj': page_obj,
+        'state_page_obj': state_page_obj,
+        'variant_rows': variant_page_obj,
+        'variant_count': variant_paginator.count,
+        'variant_page_obj': variant_page_obj,
+        'page_obj': active_page_obj,
+        'product_page_obj': product_page_obj,
         'product_sort': product_sort,
         'product_order': product_order,
         'lot_rule_choices': Product.LOT_RULE_CHOICES,
@@ -782,7 +806,7 @@ def product_master_dashboard(request):
         'company_choices': Product.COMPANY_CHOICES,
         'import_logs': _recent_import_logs('product_master'),
         **variant_filter_context,
-        **_pagination_context(request, page_obj),
+        **_pagination_context(request, active_page_obj),
     })
 
 def arrivals_dashboard(request):
@@ -1071,6 +1095,7 @@ def bulk_update_product_variant_planning_flags(request):
         messages.success(request, f"フィルタ結果の状態SKU {updated_count} 件を発注計画反映「{action_label}」に更新しました。")
         redirect_url = (
             f"/product-master/?current_company={current_company}"
+            f"&master_tab=variants"
             f"&variant_product_query={request.POST.get('variant_product_query', '')}"
             f"&variant_state_query={request.POST.get('variant_state_query', '')}"
             f"&variant_planning_filter={request.POST.get('variant_planning_filter', '')}"

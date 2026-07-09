@@ -24,6 +24,17 @@ services:
     # ★重要：iMacのフォルダとDockerの中を繋ぐことで、データ（db.sqlite3）をそのまま引き継ぎます
     volumes:
       - .:/app
+    environment:
+      DB_ENGINE: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-ordering_plan}
+      POSTGRES_USER: ${POSTGRES_USER:-ordering_plan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ordering_plan_local}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      TZ: Asia/Tokyo
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "8000:8000"
     restart: always

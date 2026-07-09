@@ -116,6 +116,21 @@ class WarehouseInventory(models.Model):
         unique_together = ('product', 'warehouse')
 
 
+class ActualStockSnapshot(models.Model):
+    """実在庫CSVの状態SKU別明細"""
+    stock_date = models.DateField(verbose_name="実在庫日")
+    product_variant = models.ForeignKey('ProductVariant', on_delete=models.CASCADE, verbose_name="状態SKU")
+    warehouse = models.ForeignKey(Warehouse, on_delete=models.CASCADE, verbose_name="倉庫")
+    quantity = models.IntegerField(verbose_name="在庫数", default=0)
+    owner_company = models.CharField(verbose_name="資産会社", max_length=20, choices=Product.COMPANY_CHOICES, default='IKUJI')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "実在庫状態SKU明細"
+        verbose_name_plural = "実在庫状態SKU明細"
+        unique_together = ('stock_date', 'product_variant', 'warehouse')
+
+
 class ProductVariant(models.Model):
     """状態コード別SKU"""
     product = models.ForeignKey(Product, on_delete=models.CASCADE, verbose_name="商品")

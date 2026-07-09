@@ -3,12 +3,13 @@ import math
 import io
 import csv
 import html
+from collections import defaultdict
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, Order, ShipmentSchedule, ArrivalSchedule, ProductVariant, InventoryState, InventoryValuationSnapshot, ImportLog, SalesImportSkip, ProductStockoutPeriod
+from .models import Product, Inventory, Warehouse, WarehouseInventory, SalesHistory, Order, ShipmentSchedule, ArrivalSchedule, ProductVariant, InventoryState, InventoryValuationSnapshot, ImportLog, SalesImportSkip, ProductStockoutPeriod, ActualStockSnapshot
 from .product_importer import import_uploaded_product_file
 from .sales_importer import import_uploaded_sales_file
 from .valuation_service import (
@@ -17,6 +18,8 @@ from .valuation_service import (
     import_valuation_snapshot,
     normalize_warehouse_name,
     parse_inventory_date,
+    SELECT_ASSET_STATE_CODES,
+    split_variant_code,
     sync_snapshot_to_planning_inventory,
     valuation_context,
 )
@@ -1007,6 +1010,53 @@ def _product_master_variant_queryset(params):
         'variant_master_order': variant_order,
     }
 
+def _rebuild_actual_stock_from_snapshots(product_ids):
+    product_ids = [pid for pid in set(product_ids or []) if pid]
+    if not product_ids:
+        return 0
+    rebuilt = 0
+    for product_id in product_ids:
+        latest_stock_date = (
+            ActualStockSnapshot.objects
+            .filter(product_variant__product_id=product_id)
+            .aggregate(latest=Max('stock_date'))['latest']
+        )
+        if not latest_stock_date:
+            continue
+        owner_companies = list(
+            ActualStockSnapshot.objects
+            .filter(product_variant__product_id=product_id, stock_date=latest_stock_date)
+            .values_list('owner_company', flat=True)
+            .distinct()
+        )
+        WarehouseInventory.objects.filter(
+            product_id=product_id,
+            warehouse__owner_company__in=owner_companies,
+        ).delete()
+        rows = (
+            ActualStockSnapshot.objects
+            .filter(
+                product_variant__product_id=product_id,
+                stock_date=latest_stock_date,
+                product_variant__include_in_planning_inventory=True,
+            )
+            .values('warehouse_id')
+            .annotate(quantity=Sum('quantity'))
+        )
+        for row in rows:
+            WarehouseInventory.objects.create(
+                product_id=product_id,
+                warehouse_id=row['warehouse_id'],
+                quantity=row['quantity'] or 0,
+            )
+        total = WarehouseInventory.objects.filter(product_id=product_id, warehouse__is_active=True).aggregate(total=Sum('quantity'))['total'] or 0
+        Inventory.objects.update_or_create(
+            product_id=product_id,
+            defaults={'current_quantity': total, 'inventory_date': latest_stock_date, 'stock_source': 'ACTUAL'},
+        )
+        rebuilt += 1
+    return rebuilt
+
 def valuation_dashboard(request):
     current_company = request.GET.get('current_company', 'IKUJI')
     if current_company not in ['IKUJI', 'SELECT']: current_company = 'IKUJI'
@@ -1075,9 +1125,10 @@ def update_product_variant_planning_flag(request, variant_id):
     variant = get_object_or_404(ProductVariant, id=variant_id)
     variant.include_in_planning_inventory = 'include_in_planning_inventory' in request.POST
     variant.save(update_fields=['include_in_planning_inventory'])
+    rebuilt_count = _rebuild_actual_stock_from_snapshots([variant.product_id])
     messages.success(
         request,
-        f"状態SKU［{variant.product.code}-{variant.state_code}］の発注計画反映設定を更新しました。"
+        f"状態SKU［{variant.product.code}-{variant.state_code}］の発注計画反映設定を更新しました。実在庫再合算: {rebuilt_count}件"
     )
     return redirect(request.META.get('HTTP_REFERER', 'valuation_dashboard'))
 
@@ -1089,10 +1140,12 @@ def bulk_update_product_variant_planning_flags(request):
     source = request.POST.get('source', 'valuation')
     if source == 'product_master':
         variant_queryset, _ = _product_master_variant_queryset(request.POST)
+        product_ids = list(variant_queryset.values_list('product_id', flat=True).distinct())
         include_value = request.POST.get('bulk_action') == 'include'
         updated_count = variant_queryset.update(include_in_planning_inventory=include_value)
+        rebuilt_count = _rebuild_actual_stock_from_snapshots(product_ids)
         action_label = '含める' if include_value else '除外'
-        messages.success(request, f"フィルタ結果の状態SKU {updated_count} 件を発注計画反映「{action_label}」に更新しました。")
+        messages.success(request, f"フィルタ結果の状態SKU {updated_count} 件を発注計画反映「{action_label}」に更新しました。実在庫再合算: {rebuilt_count}件")
         redirect_url = (
             f"/product-master/?current_company={current_company}"
             f"&master_tab=variants"
@@ -1109,12 +1162,15 @@ def bulk_update_product_variant_planning_flags(request):
     variant_ids = [row['product_variant_id'] for row in variant_rows if row.get('product_variant_id')]
     include_value = request.POST.get('bulk_action') == 'include'
     updated_count = 0
+    product_ids = []
     if variant_ids:
+        product_ids = list(ProductVariant.objects.filter(id__in=variant_ids).values_list('product_id', flat=True).distinct())
         updated_count = ProductVariant.objects.filter(id__in=variant_ids).update(
             include_in_planning_inventory=include_value
         )
+    rebuilt_count = _rebuild_actual_stock_from_snapshots(product_ids)
     action_label = '含める' if include_value else '除外'
-    messages.success(request, f"表示中の状態SKU {updated_count} 件を発注計画反映「{action_label}」に更新しました。")
+    messages.success(request, f"表示中の状態SKU {updated_count} 件を発注計画反映「{action_label}」に更新しました。実在庫再合算: {rebuilt_count}件")
     redirect_url = (
         f"/valuation/?current_company={current_company}"
         f"&inventory_date={selected_date:%Y-%m-%d}"
@@ -1460,52 +1516,87 @@ def import_inventory_csv(request):
             if not headers or '商品コード' not in headers: return redirect('/?current_company=' + current_company)
             warehouse_headers = [wh_name for wh_name in headers if wh_name != '商品コード']
             wh_map = {}
-            for source_warehouse_name in warehouse_headers:
-                wh_name = normalize_warehouse_name(source_warehouse_name)
-                warehouse, _ = Warehouse.objects.get_or_create(
-                    name=wh_name,
-                    owner_company=current_company,
-                    defaults={'is_transit': "移動中" in wh_name},
-                )
-                if not warehouse.is_active:
-                    warehouse.is_active = True
-                    warehouse.save(update_fields=['is_active'])
-                wh_map[source_warehouse_name] = warehouse
             products = {p.code: p for p in Product.objects.all()}
+            state_names = {state.state_code: state.state_name for state in InventoryState.objects.all()}
             try: selected_date = datetime.datetime.strptime(request.POST.get('inventory_date', ''), '%Y-%m-%d').date()
             except: selected_date = datetime.date.today()
-            row_count, unknown_count, quantity_error_count = 0, 0, 0
+            row_count, unknown_count, quantity_error_count, excluded_variant_count = 0, 0, 0, 0
             seen_codes = set()
+            touched_product_companies = set()
+            snapshot_quantities = defaultdict(int)
             error_samples = []
             for row in reader:
-                code = _normalize_inventory_product_code(row.get('商品コード', ''))
+                code, state_code = split_variant_code(row.get('商品コード', ''))
                 if not code: continue
                 if code not in products:
                     unknown_count += 1
                     if len(error_samples) < 20:
                         error_samples.append(f"商品未登録: {code}")
                     continue
+                p_obj = products[code]
+                variant, _ = ProductVariant.objects.get_or_create(
+                    product=p_obj,
+                    state_code=state_code or '000',
+                    defaults={'state_name': state_names.get(state_code, state_code or '')},
+                )
+                owner_company = 'SELECT' if state_code in SELECT_ASSET_STATE_CODES else 'IKUJI'
                 seen_codes.add(code)
-                p_obj, tot = products[code], 0
-                WarehouseInventory.objects.filter(product=p_obj, warehouse__owner_company=current_company).delete()
-                for w_name, w_obj in wh_map.items():
-                    qty, had_error = _parse_inventory_quantity(row.get(w_name, '0'))
+                touched_product_companies.add((p_obj.id, owner_company))
+                row_count += 1
+                include_in_planning = variant.include_in_planning_inventory
+                if not include_in_planning:
+                    excluded_variant_count += 1
+                    if len(error_samples) < 20:
+                        error_samples.append(f"発注計画反映除外: {code}-{state_code}")
+                for source_warehouse_name in warehouse_headers:
+                    wh_name = normalize_warehouse_name(source_warehouse_name)
+                    wh_key = (owner_company, source_warehouse_name)
+                    if wh_key not in wh_map:
+                        warehouse, _ = Warehouse.objects.get_or_create(
+                            name=wh_name,
+                            owner_company=owner_company,
+                            defaults={'is_transit': "移動中" in wh_name},
+                        )
+                        if not warehouse.is_active:
+                            warehouse.is_active = True
+                            warehouse.save(update_fields=['is_active'])
+                        wh_map[wh_key] = warehouse
+                    qty, had_error = _parse_inventory_quantity(row.get(source_warehouse_name, '0'))
                     if had_error:
                         quantity_error_count += 1
                         if len(error_samples) < 20:
-                            error_samples.append(f"数量エラー: 商品{code} / {w_name} / 値={row.get(w_name, '')}")
-                    WarehouseInventory.objects.create(product=p_obj, warehouse=w_obj, quantity=qty)
-                    tot += qty
-                Inventory.objects.update_or_create(product=p_obj, defaults={'current_quantity': tot, 'inventory_date': selected_date, 'stock_source': 'ACTUAL'})
-                row_count += 1
-            _recalculate_abc_ranks(current_company)
+                            error_samples.append(f"数量エラー: 商品{code}-{state_code} / {source_warehouse_name} / 値={row.get(source_warehouse_name, '')}")
+                    snapshot_quantities[(variant.id, wh_map[wh_key].id, owner_company)] += qty
+            for product_id, owner_company in touched_product_companies:
+                ActualStockSnapshot.objects.filter(
+                    stock_date=selected_date,
+                    product_variant__product_id=product_id,
+                    owner_company=owner_company,
+                ).delete()
+                WarehouseInventory.objects.filter(product_id=product_id, warehouse__owner_company=owner_company).delete()
+            snapshot_objects = [
+                ActualStockSnapshot(
+                    stock_date=selected_date,
+                    product_variant_id=variant_id,
+                    warehouse_id=warehouse_id,
+                    owner_company=owner_company,
+                    quantity=qty,
+                )
+                for (variant_id, warehouse_id, owner_company), qty in snapshot_quantities.items()
+            ]
+            if snapshot_objects:
+                ActualStockSnapshot.objects.bulk_create(snapshot_objects)
+            _rebuild_actual_stock_from_snapshots([products[code].id for code in seen_codes])
+            touched_companies = {owner_company for _, owner_company in touched_product_companies} or {current_company}
+            for company in touched_companies:
+                _recalculate_abc_ranks(company)
             unchanged_count = max(len(products) - len(seen_codes), 0)
-            issue_count = unknown_count + quantity_error_count
+            issue_count = unknown_count + quantity_error_count + excluded_variant_count
             _log_import(
                 'planning',
                 '実在庫CSV',
                 _status_from_counts(issue_count),
-                f"更新: {row_count}件 / 未更新: {unchanged_count}件 / 商品未登録: {unknown_count}件 / 数量エラー: {quantity_error_count}件",
+                f"読取行: {row_count}件 / 更新商品: {len(seen_codes)}件 / 未更新: {unchanged_count}件 / 商品未登録: {unknown_count}件 / 発注計画反映除外: {excluded_variant_count}件 / 数量エラー: {quantity_error_count}件",
                 request=request,
                 company=current_company,
                 details="\n".join(error_samples),
@@ -1514,7 +1605,7 @@ def import_inventory_csv(request):
             messages.success(
                 request,
                 f"{selected_date:%Y/%m/%d}時点の全倉庫実在庫を商品単位で洗替し再評価しました！ "
-                f"(更新: {row_count}件 / 未更新: {unchanged_count}件 / 商品未登録: {unknown_count}件 / 数量エラー: {quantity_error_count}件)"
+                f"(読取行: {row_count}件 / 更新商品: {len(seen_codes)}件 / 未更新: {unchanged_count}件 / 商品未登録: {unknown_count}件 / 発注計画反映除外: {excluded_variant_count}件 / 数量エラー: {quantity_error_count}件)"
             )
         except Exception as e:
             _log_import('planning', '実在庫CSV', 'error', f"取込失敗: {e}", request=request, company=current_company, error_count=1)

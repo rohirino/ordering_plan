@@ -502,6 +502,53 @@ class ImportProductsCommandTests(TestCase):
         self.assertEqual(Inventory.objects.get(product=untouched).current_quantity, 7)
         self.assertEqual(WarehouseInventory.objects.filter(product=product).count(), 2)
 
+    def test_inventory_upload_aggregates_state_variant_rows_by_product_and_company(self):
+        product = Product.objects.create(code='7040002', name='EC ｱｵﾑｼDOG ﾌﾜﾌﾜﾛｰﾌﾟﾄｲ(M)', owner_company='IKUJI')
+        Inventory.objects.create(product=product, current_quantity=0)
+        ProductVariant.objects.create(product=product, state_code='001', state_name='A品')
+        ProductVariant.objects.create(product=product, state_code='400', state_name='PET SELECT')
+        ProductVariant.objects.create(product=product, state_code='404', state_name='PET SELECT（卸販売）')
+
+        rows = [
+            ['商品コード', 'ﾆﾁｲｸ物流', '岸和田倉庫'],
+            ['7040002001', '0', '2,572'],
+            ['7040002400', '61', '0'],
+            ['7040002404', '130', '0'],
+        ]
+        uploaded = SimpleUploadedFile(
+            'inventory.csv',
+            self.csv_bytes(rows),
+            content_type='text/csv',
+        )
+
+        response = self.client.post(
+            reverse('import_inventory_csv'),
+            {'current_company': 'IKUJI', 'inventory_date': '2026-06-30', 'csv_file': uploaded},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            WarehouseInventory.objects.get(product=product, warehouse__owner_company='IKUJI', warehouse__name='岸和田倉庫').quantity,
+            2572,
+        )
+        self.assertEqual(
+            WarehouseInventory.objects.get(product=product, warehouse__owner_company='SELECT', warehouse__name='ﾆﾁｲｸ物流').quantity,
+            191,
+        )
+        self.assertEqual(Inventory.objects.get(product=product).current_quantity, 2763)
+
+        response = self.client.post(
+            reverse('update_product_variant_planning_flag', args=[ProductVariant.objects.get(product=product, state_code='400').id]),
+            {'current_company': 'IKUJI'},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            WarehouseInventory.objects.get(product=product, warehouse__owner_company='SELECT', warehouse__name='ﾆﾁｲｸ物流').quantity,
+            130,
+        )
+        self.assertEqual(Inventory.objects.get(product=product).current_quantity, 2702)
+
     def test_planning_base_date_uses_today_when_no_sales_history_exists(self):
         product = Product.objects.create(code='6460010', name='グリップ シート', owner_company='IKUJI')
         Inventory.objects.create(product=product, current_quantity=12, inventory_date='2026-05-31')

@@ -370,8 +370,9 @@ def _recalculate_abc_ranks(target_company='IKUJI', base_date=None, sales_cutoff_
                 
     Product.objects.bulk_update(p_dict.values(), ['abc_rank'])
 
-def _execute_single_order_plan(product, inventory, base_date, future_end_date, sales_map_select, sales_map_ikuji, ship_map, arr_map, existing_order_map=None, target_company='IKUJI'):
+def _execute_single_order_plan(product, inventory, base_date, future_end_date, sales_map_select, sales_map_ikuji, ship_map, arr_map, existing_order_map=None, target_company='IKUJI', starting_stock=None):
     pid = product.id
+    base_stock = inventory.current_quantity if starting_stock is None else starting_stock
     sales_data = sales_map_select.get(pid, {'sum_30': 0, 'sum_long': 0}) if target_company == 'SELECT' else sales_map_ikuji.get(pid, {'sum_30': 0, 'sum_long': 0})
     tdays = product.trend_days if product.trend_days in [90, 120, 150, 180] else 90
     effective_long_days = sales_data.get('effective_long', tdays) or tdays
@@ -388,7 +389,7 @@ def _execute_single_order_plan(product, inventory, base_date, future_end_date, s
     horizon_days = (future_end_date - base_date).days
 
     def forecast(order_arrivals):
-        running_stock = inventory.current_quantity
+        running_stock = base_stock
         stocks = {}
         for i in range(horizon_days):
             day = base_date + timedelta(days=i)
@@ -405,7 +406,7 @@ def _execute_single_order_plan(product, inventory, base_date, future_end_date, s
     interval_days = max(0, product.order_interval_days or 0)
     if interval_days == 0:
         stocks = forecast(existing_arrivals)
-        min_stock = min(stocks.values(), default=inventory.current_quantity)
+        min_stock = min(stocks.values(), default=base_stock)
         shortage = order_point - min_stock if min_stock < order_point else 0
         if shortage <= 0:
             return 0
@@ -426,7 +427,7 @@ def _execute_single_order_plan(product, inventory, base_date, future_end_date, s
         if arrival_date > future_end_date - timedelta(days=1):
             continue
         stocks = forecast(planned_arrivals)
-        projected_stock = stocks.get(arrival_date, inventory.current_quantity)
+        projected_stock = stocks.get(arrival_date, base_stock)
         target_stock = order_point + (daily_demand * interval_days)
         shortage = target_stock - projected_stock
         if shortage <= 0:
@@ -446,6 +447,9 @@ def _execute_single_order_plan(product, inventory, base_date, future_end_date, s
 def planning_dashboard(request):
     current_company = request.GET.get('current_company', 'IKUJI')
     if current_company not in ['IKUJI', 'SELECT']: current_company = 'IKUJI'
+    active_tab = request.GET.get('tab', 'planning')
+    if active_tab not in ['planning', 'stock']:
+        active_tab = 'planning'
     requested_stock_base_date = _parse_stock_base_date(request.GET.get('stock_base_date'))
     stock_base_date = _get_stock_base_date(current_company, requested_stock_base_date)
     base_date = _get_planning_base_date(current_company, stock_base_date)
@@ -529,8 +533,8 @@ def planning_dashboard(request):
     for rec in wh_inv_records:
         if rec.warehouse.owner_company == current_company: wh_stock_map.setdefault(rec.product_id, {})[rec.warehouse_id] = rec.quantity
         elif current_company == 'SELECT' and rec.warehouse_id in shared_wh_ids:
-            cross_company_wh_stock.setdefault(rec.product.code, {})[rec.warehouse_id] = rec.quantity
-            cross_company_stock[rec.product.code] = cross_company_stock.get(rec.product.code, 0) + rec.quantity
+            cross_company_wh_stock.setdefault(rec.product_id, {})[rec.warehouse_id] = rec.quantity
+            cross_company_stock[rec.product_id] = cross_company_stock.get(rec.product_id, 0) + rec.quantity
     all_inventories_for_kpi = Inventory.objects.select_related('product').filter(product__is_excluded=False, product_id__in=planning_product_ids)
     if not show_discontinued:
         all_inventories_for_kpi = all_inventories_for_kpi.filter(product__is_discontinued=False)
@@ -545,7 +549,7 @@ def planning_dashboard(request):
         k_daily_short = k_sales.get('sum_30', 0) / k_effective_30
         k_daily_demand = k_daily_long * max(k_item.product.trend_min, min((k_daily_short / k_daily_long if k_daily_long > 0 else 1.0), k_item.product.trend_max))
         k_order_point = (k_daily_demand * k_item.product.lead_time) + k_item.safety_stock
-        k_stock = sum(wh_stock_map.get(k_pid, {}).values()) + cross_company_stock.get(k_item.product.code, 0) if current_company == 'SELECT' else sum(wh_stock_map.get(k_pid, {}).values())
+        k_stock = sum(wh_stock_map.get(k_pid, {}).values()) + cross_company_stock.get(k_pid, 0) if current_company == 'SELECT' else sum(wh_stock_map.get(k_pid, {}).values())
         k_ships = ship_map.get(k_pid, {}); k_arrs = arr_map.get(k_pid, {}); k_orders = planned_order_map.get(k_pid, {}); k_has_shortage, k_has_op = False, False
         for i in range(120):
             d = base_date + timedelta(days=i)
@@ -610,7 +614,7 @@ def planning_dashboard(request):
         for wh in all_warehouses: item.warehouse_breakdown.append({'name': wh.name, 'quantity': product_wh_data.get(wh.id, 0), 'is_transit': wh.is_transit})
         shared_total = 0
         if current_company == 'SELECT' and shared_wh_ids:
-            shared_total = cross_company_stock.get(pcode, 0); shared_wh_data = cross_company_wh_stock.get(pcode, {})
+            shared_total = cross_company_stock.get(pid, 0); shared_wh_data = cross_company_wh_stock.get(pid, {})
             for wh in ikuji_warehouses:
                 if wh.id in shared_wh_ids: item.warehouse_breakdown.append({'name': f"{wh.name}(育)", 'quantity': shared_wh_data.get(wh.id, 0), 'is_transit': wh.is_transit})
         item.current_quantity = sum(product_wh_data.values()) + shared_total
@@ -636,6 +640,38 @@ def planning_dashboard(request):
             item.status_alert = f"🚨 欠品リスク{suffix}" if has_shortage_risk else f"⚠️ 発注点割れ{suffix}" if has_order_point_risk else f"正常{suffix}"
             item.needs_order = has_shortage_risk or has_order_point_risk
         visible_inventories.append(item)
+
+    stock_warehouses = list(Warehouse.objects.filter(is_active=True).order_by('owner_company', 'id'))
+    stock_products = Product.objects.filter(warehouseinventory__warehouse__is_active=True).distinct().order_by('code')
+    stock_paginator = Paginator(stock_products, 100)
+    stock_page_number = request.GET.get('stock_page', 1)
+    try:
+        stock_page_obj = stock_paginator.page(stock_page_number)
+    except PageNotAnInteger:
+        stock_page_obj = stock_paginator.page(1)
+    except EmptyPage:
+        stock_page_obj = stock_paginator.page(stock_paginator.num_pages)
+    stock_product_ids = [product.id for product in stock_page_obj]
+    stock_map = {}
+    for row in WarehouseInventory.objects.filter(product_id__in=stock_product_ids, warehouse__is_active=True).values('product_id', 'warehouse_id', 'quantity'):
+        stock_map.setdefault(row['product_id'], {})[row['warehouse_id']] = row['quantity']
+    stock_inventory_map = {
+        inv.product_id: inv
+        for inv in Inventory.objects.filter(product_id__in=stock_product_ids)
+    }
+    stock_rows = []
+    for product in stock_page_obj:
+        wh_qty = stock_map.get(product.id, {})
+        ikuji_total = sum(qty for wh in stock_warehouses if wh.owner_company == 'IKUJI' for qty in [wh_qty.get(wh.id, 0)])
+        select_total = sum(qty for wh in stock_warehouses if wh.owner_company == 'SELECT' for qty in [wh_qty.get(wh.id, 0)])
+        stock_rows.append({
+            'product': product,
+            'inventory': stock_inventory_map.get(product.id),
+            'warehouse_quantities': wh_qty,
+            'ikuji_total': ikuji_total,
+            'select_total': select_total,
+            'grand_total': ikuji_total + select_total,
+        })
     return render(request, 'inventory/dashboard.html', {
         'inventories': visible_inventories, 'page_obj': page_obj, 'date_list': date_list,
         'active_months': active_months, 'search_query': search_query,
@@ -650,6 +686,12 @@ def planning_dashboard(request):
         'active_filter': active_filter, 'all_warehouses': all_warehouses,
         'ikuji_warehouses': ikuji_warehouses, 'shared_wh_ids': shared_wh_ids,
         'kpi_shortage_cnt': kpi_shortage_cnt, 'kpi_order_point_cnt': kpi_order_point_cnt,
+        'active_tab': active_tab,
+        'stock_warehouses': stock_warehouses,
+        'stock_rows': stock_rows,
+        'stock_page_obj': stock_page_obj,
+        'stock_page_jump_back': max(1, stock_page_obj.number - 10),
+        'stock_page_jump_forward': min(stock_page_obj.paginator.num_pages, stock_page_obj.number + 10),
         'import_logs': _recent_import_logs('planning'),
         **_pagination_context(request, page_obj, button_class='page-btn'),
     })
@@ -1238,6 +1280,7 @@ def create_order_plan(request, product_id):
     current_company = request.POST.get('current_company', 'IKUJI')
     if current_company not in ['IKUJI', 'SELECT']:
         current_company = 'IKUJI'
+    shared_wh_ids = [int(x) for x in request.POST.getlist('shared_whs') if x.isdigit()]
     product = get_object_or_404(Product, id=product_id); inventory = Inventory.objects.get(product=product)
     stock_base_date = _get_stock_base_date(current_company, _parse_stock_base_date(request.POST.get('stock_base_date')))
     base_date = _get_planning_base_date(current_company, stock_base_date); future_end_date = base_date + timedelta(days=120)
@@ -1251,7 +1294,10 @@ def create_order_plan(request, product_id):
     ship_map = {s['product_id']: {s['shipment_date']: s['total']} for s in ShipmentSchedule.objects.filter(shipment_date__gte=base_date, shipment_date__lte=future_end_date).values('product_id', 'shipment_date').annotate(total=Sum('quantity'))}
     arr_map = _build_arrival_map(ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date))
     existing_order_map = _build_order_arrival_map(Order.objects.filter(product=product, status__in=['計画中', '発注済']))
-    created_count = _execute_single_order_plan(product, inventory, base_date, future_end_date, s_map_select, s_map_ikuji, ship_map, arr_map, existing_order_map, target_company=current_company)
+    shared_stock = 0
+    if current_company == 'SELECT' and shared_wh_ids:
+        shared_stock = WarehouseInventory.objects.filter(product=product, warehouse_id__in=shared_wh_ids).aggregate(total=Sum('quantity'))['total'] or 0
+    created_count = _execute_single_order_plan(product, inventory, base_date, future_end_date, s_map_select, s_map_ikuji, ship_map, arr_map, existing_order_map, target_company=current_company, starting_stock=inventory.current_quantity + shared_stock)
     if created_count: messages.success(request, f"商品［{product.code}］の発注計画を {created_count} 件作成しました。")
     else: messages.info(request, "発注基準を満たしていないためスキップしました。")
     return redirect(request.META.get('HTTP_REFERER', 'planning_dashboard'))
@@ -1259,6 +1305,7 @@ def create_order_plan(request, product_id):
 @require_POST
 def bulk_create_order_plan(request):
     current_company = request.POST.get('current_company', 'IKUJI'); selected_pids = request.POST.getlist('selected_products')
+    shared_wh_ids = [int(x) for x in request.POST.getlist('shared_whs') if x.isdigit()]
     if not selected_pids:
         messages.warning(request, "商品が選択されていません。")
         return redirect('/?current_company=' + current_company)
@@ -1285,11 +1332,15 @@ def bulk_create_order_plan(request):
     arr_map = _build_arrival_map(ArrivalSchedule.objects.filter(arrival_date__gte=base_date, arrival_date__lte=future_end_date))
     existing_order_map = _build_order_arrival_map(Order.objects.filter(product_id__in=products_by_id, status__in=['計画中', '発注済']))
     inventories = {inv.product_id: inv for inv in Inventory.objects.filter(product_id__in=products_by_id)}
+    shared_stock_map = {}
+    if current_company == 'SELECT' and shared_wh_ids:
+        for row in WarehouseInventory.objects.filter(product_id__in=products_by_id, warehouse_id__in=shared_wh_ids).values('product_id').annotate(total=Sum('quantity')):
+            shared_stock_map[row['product_id']] = row['total'] or 0
     created_count = 0
     for p in products:
         inv = inventories.get(p.id)
         if inv:
-            created_count += _execute_single_order_plan(p, inv, base_date, future_end_date, s_map_select, s_map_ikuji, ship_map, arr_map, existing_order_map, target_company=current_company)
+            created_count += _execute_single_order_plan(p, inv, base_date, future_end_date, s_map_select, s_map_ikuji, ship_map, arr_map, existing_order_map, target_company=current_company, starting_stock=inv.current_quantity + shared_stock_map.get(p.id, 0))
     messages.success(request, f"一括発注計算完了！（{created_count}件の計画を新規生成）")
     return redirect('/?current_company=' + current_company)
 

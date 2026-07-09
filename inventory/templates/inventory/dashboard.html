@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+{% load inventory_extras %}
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
@@ -141,6 +142,19 @@
         .stock-basis-note { padding: 4px 8px; border-left: 4px solid #f08c00; background: #fff9db; color: #5f3dc4; font-size: 11px; line-height: 1.45; }
         .order-count-badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; background: #fff5f5; border: 1px solid #ffa8a8; color: #c92a2a; font-weight: 900; }
         .order-count-badge.has-orders { animation: orderPulse 1.2s ease-in-out infinite; }
+        .view-tabs { display: flex; gap: 4px; margin: 4px 0; border-bottom: 2px solid #dee2e6; }
+        .view-tab { padding: 6px 18px; border: 1px solid #ced4da; border-bottom: 0; background: #f1f3f5; color: #495057; text-decoration: none; border-radius: 4px 4px 0 0; font-size: 12px; font-weight: 900; }
+        .view-tab.active { background: #c92a2a; color: #fff; border-color: #c92a2a; }
+        body.company-select .view-tab.active { background: #1864ab; border-color: #1864ab; }
+        .stock-list-table { width: 100%; min-width: 1200px; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+        .stock-list-table th, .stock-list-table td { border-right: 1px solid #dee2e6; border-bottom: 1px solid #dee2e6; padding: 5px 7px; background: #fff; }
+        .stock-list-table th { position: sticky; top: 0; z-index: 5; background: #e9ecef; font-weight: 900; white-space: nowrap; }
+        .stock-list-table td.num { text-align: right; font-weight: 800; }
+        .stock-list-table .product-code { font-weight: 900; color: #495057; white-space: nowrap; }
+        .stock-list-table .product-name { min-width: 260px; }
+        .stock-list-table .total-ikuji { background: #fff5f5; color: #c92a2a; }
+        .stock-list-table .total-select { background: #e7f5ff; color: #1864ab; }
+        .stock-list-table .total-all { background: #f8f9fa; color: #212529; }
         @keyframes orderPulse {
             0%, 100% { background: #fff5f5; color: #c92a2a; box-shadow: 0 0 0 rgba(201,42,42,0); }
             50% { background: #c92a2a; color: #fff; box-shadow: 0 0 8px rgba(201,42,42,0.55); }
@@ -345,17 +359,59 @@
             </table>
         </div>
 
+        <div class="view-tabs">
+            <a class="view-tab {% if active_tab == 'planning' %}active{% endif %}" href="?current_company={{ current_company }}&tab=planning">検討表</a>
+            <a class="view-tab {% if active_tab == 'stock' %}active{% endif %}" href="?current_company={{ current_company }}&tab=stock">現在の実在庫一覧</a>
+        </div>
+
+        {% if active_tab == 'planning' %}
         <form id="bulkOrderForm" method="POST" action="{% url 'bulk_create_order_plan' %}" style="margin: 0;">
             {% csrf_token %}<input type="hidden" name="current_company" value="{{ current_company }}"><input type="hidden" name="stock_base_date" value="{{ stock_base_date_param }}">
+            {% for wh_id in shared_wh_ids %}<input type="hidden" name="shared_whs" value="{{ wh_id }}">{% endfor %}
             <div style="margin: 2px 0 0 0; display: flex; align-items: center; gap: 12px; background: #fff5f5; border: 1px dashed #ffc9c9; padding: 4px 10px; border-radius: 4px;">
                 <button type="submit" style="background-color: #dc3545; color: white; border: none; padding: 4px 14px; border-radius: 4px; font-weight: bold; font-size: 12px; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">📦 選択したチェック品番を一括で自動計算発注に投入する</button>
                 <label style="font-size: 12px; color: #e03131; font-weight: bold; cursor: pointer; user-select: none;"><input type="checkbox" id="selectAllItems" onchange="toggleSelectAll(this)" style="cursor: pointer;"> ページ内の全品番を選択 / 解除</label>
                 <a href="{% url 'export_stockout_periods_csv' %}?current_company={{ current_company }}" style="margin-left:auto; display:inline-block; padding:3px 8px; border:1px solid #f08c00; border-radius:4px; background:#fff9db; color:#8a5a00; text-decoration:none; font-size:11px; font-weight:bold;">欠品履歴CSV</a>
             </div>
         </form>
+        {% endif %}
     </div>
 
     <div class="scroll-container">
+        {% if active_tab == 'stock' %}
+        <table class="stock-list-table">
+            <thead>
+                <tr>
+                    <th>商品コード</th>
+                    <th>商品名</th>
+                    <th>在庫基準日</th>
+                    {% for wh in stock_warehouses %}
+                        <th>{% if wh.owner_company == 'IKUJI' %}日本育児{% else %}ペット{% endif %}<br>{{ wh.name }}</th>
+                    {% endfor %}
+                    <th>日本育児合計</th>
+                    <th>ペット合計</th>
+                    <th>総合計</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in stock_rows %}
+                <tr>
+                    <td class="product-code">{{ row.product.code }}</td>
+                    <td class="product-name">{{ row.product.name }}</td>
+                    <td>{% if row.inventory and row.inventory.inventory_date %}{{ row.inventory.inventory_date|date:"Y/m/d" }}{% else %}-{% endif %}</td>
+                    {% for wh in stock_warehouses %}
+                        <td class="num">{{ row.warehouse_quantities|get_item:wh.id|default:0 }}</td>
+                    {% endfor %}
+                    <td class="num total-ikuji">{{ row.ikuji_total }}</td>
+                    <td class="num total-select">{{ row.select_total }}</td>
+                    <td class="num total-all">{{ row.grand_total }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="99" style="text-align:center; padding:16px;">実在庫データがありません。</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
         <table class="data-table">
             <thead>
                 <tr>
@@ -467,7 +523,9 @@
                                 {% if item.needs_order %}
                                     <form action="{% url 'create_order_plan' item.product.id %}" method="POST" style="margin: 0;">
                                         {% csrf_token %}
+                                        <input type="hidden" name="current_company" value="{{ current_company }}">
                                         <input type="hidden" name="stock_base_date" value="{{ stock_base_date_param }}">
+                                        {% for wh_id in shared_wh_ids %}<input type="hidden" name="shared_whs" value="{{ wh_id }}">{% endfor %}
                                         <button type="submit" style="background-color: #dc3545; color: white; border: none; padding: 1px 6px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 11px; height: 18px; line-height: 1; white-space: nowrap;">発注</button>
                                     </form>
                                 {% else %}
@@ -537,9 +595,32 @@
                 {% empty %}<tr> <td colspan="130" style="padding: 10px; text-align: center;">データが見つかりません。</td> </tr>{% endfor %}
             </tbody>
         </table>
+        {% endif %}
     </div>
 
-    {% include 'inventory/partials/pagination.html' %}
+    {% if active_tab == 'stock' %}
+        {% if stock_page_obj.paginator.num_pages > 1 %}
+        <div class="pager pagination-controls">
+            {% if stock_page_obj.has_previous %}
+                <a class="page-btn" href="?current_company={{ current_company }}&tab=stock&stock_page=1">最初</a>
+                <a class="page-btn" href="?current_company={{ current_company }}&tab=stock&stock_page={{ stock_page_jump_back }}">10前</a>
+                <a class="page-btn" href="?current_company={{ current_company }}&tab=stock&stock_page={{ stock_page_obj.previous_page_number }}">前へ</a>
+            {% endif %}
+            <span class="pagination-status">{{ stock_page_obj.number }} / {{ stock_page_obj.paginator.num_pages }} ページ（{{ stock_page_obj.paginator.count }} 件）</span>
+            <form class="pagination-jump" onsubmit="const page = this.elements.stock_page.value; const url = new URL(window.location.href); url.searchParams.set('tab', 'stock'); url.searchParams.set('stock_page', page); window.location.assign(url); return false;">
+                <input type="number" name="stock_page" min="1" max="{{ stock_page_obj.paginator.num_pages }}" value="{{ stock_page_obj.number }}" aria-label="移動するページ">
+                <button type="submit" class="page-btn">移動</button>
+            </form>
+            {% if stock_page_obj.has_next %}
+                <a class="page-btn" href="?current_company={{ current_company }}&tab=stock&stock_page={{ stock_page_jump_forward }}">10次</a>
+                <a class="page-btn" href="?current_company={{ current_company }}&tab=stock&stock_page={{ stock_page_obj.next_page_number }}">次へ</a>
+                <a class="page-btn" href="?current_company={{ current_company }}&tab=stock&stock_page={{ stock_page_obj.paginator.num_pages }}">最後</a>
+            {% endif %}
+        </div>
+        {% endif %}
+    {% else %}
+        {% include 'inventory/partials/pagination.html' %}
+    {% endif %}
 
     <div id="graphModal" class="modal">
         <div class="modal-content"><span class="close-btn" onclick="closeModal()">&times;</span><h3 id="modalTitle" style="margin-top: 0; color: #333;">商品別 在庫予測推移</h3><div style="position: relative; width: 100%; height: 400px;"><canvas id="predictionChart"></canvas></div></div>

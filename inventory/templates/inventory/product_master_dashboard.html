@@ -71,13 +71,15 @@
         .pagination-status { font-weight: bold; color: #495057; white-space: nowrap; }
         .pagination-jump { display: flex; align-items: center; gap: 3px; margin: 0; }
         .pagination-jump input { width: 54px; padding: 4px; text-align: right; }
-        .state-layout { display: grid; grid-template-columns: minmax(360px, 0.75fr) minmax(460px, 1.25fr); gap: 10px; align-items: start; }
-        .state-list { max-height: 220px; overflow: auto; border: 1px solid #c9ced6; }
+        .state-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(360px, 0.75fr) minmax(460px, 1.25fr); gap: 10px; align-items: stretch; }
+        .state-layout > div, .variant-layout > div { min-height: 0; }
+        .state-layout > div:last-child, .variant-layout > div:last-child { display: flex; flex-direction: column; }
+        .state-list { flex: 1; min-height: 0; overflow: auto; border: 1px solid #c9ced6; }
         .state-list table { min-width: 520px; }
         .state-code { width: 78px; font-weight: bold; white-space: nowrap; }
         .state-name-input { width: 260px; }
-        .variant-layout { display: grid; grid-template-columns: minmax(360px, 0.7fr) minmax(620px, 1.3fr); gap: 10px; align-items: start; }
-        .variant-list { max-height: 260px; overflow: auto; border: 1px solid #c9ced6; }
+        .variant-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(360px, 0.7fr) minmax(620px, 1.3fr); gap: 10px; align-items: stretch; }
+        .variant-list { flex: 1; min-height: 0; overflow: auto; border: 1px solid #c9ced6; }
         .variant-list table { min-width: 760px; }
         .variant-list .planning-on { color: #2b8a3e; font-weight: 900; }
         .variant-list .planning-off { color: #c92a2a; font-weight: 900; }

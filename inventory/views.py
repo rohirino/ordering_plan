@@ -760,6 +760,9 @@ def product_master_dashboard(request):
         inventory_states = inventory_states.filter(
             Q(state_code__icontains=state_search_query) | Q(state_name__icontains=state_search_query)
         )
+    variant_queryset, variant_filter_context = _product_master_variant_queryset(request.GET)
+    variant_count = variant_queryset.count()
+    variant_rows = variant_queryset[:150]
     return render(request, 'inventory/product_master_dashboard.html', {
         'current_company': current_company,
         'search_query': search_query,
@@ -769,6 +772,8 @@ def product_master_dashboard(request):
         'products': product_rows,
         'inventory_states': inventory_states[:80],
         'inventory_state_count': inventory_states.count(),
+        'variant_rows': variant_rows,
+        'variant_count': variant_count,
         'page_obj': page_obj,
         'product_sort': product_sort,
         'product_order': product_order,
@@ -776,6 +781,7 @@ def product_master_dashboard(request):
         'trend_days_choices': Product.TREND_DAYS_CHOICES,
         'company_choices': Product.COMPANY_CHOICES,
         'import_logs': _recent_import_logs('product_master'),
+        **variant_filter_context,
         **_pagination_context(request, page_obj),
     })
 
@@ -944,6 +950,39 @@ def _filter_valuation_variant_rows(variant_rows, params):
         'variant_filtered_count': len(variant_rows),
     }
 
+def _product_master_variant_queryset(params):
+    product_query = params.get('variant_product_query', '').strip()
+    state_query = params.get('variant_state_query', '').strip()
+    planning_filter = params.get('variant_planning_filter', '').strip()
+    variant_sort = params.get('variant_master_sort', 'product_code')
+    variant_order = params.get('variant_master_order', 'asc')
+    variants = ProductVariant.objects.select_related('product').all()
+    if product_query:
+        variants = variants.filter(Q(product__code__icontains=product_query) | Q(product__name__icontains=product_query))
+    if state_query:
+        variants = variants.filter(Q(state_code__icontains=state_query) | Q(state_name__icontains=state_query))
+    if planning_filter == 'included':
+        variants = variants.filter(include_in_planning_inventory=True)
+    elif planning_filter == 'excluded':
+        variants = variants.filter(include_in_planning_inventory=False)
+    sort_fields = {
+        'product_code': 'product__code',
+        'product_name': 'product__name',
+        'state_code': 'state_code',
+        'state_name': 'state_name',
+        'planning': 'include_in_planning_inventory',
+    }
+    sort_field = sort_fields.get(variant_sort, 'product__code')
+    if variant_order == 'desc':
+        sort_field = '-' + sort_field
+    return variants.order_by(sort_field, 'product__code', 'state_code'), {
+        'variant_product_query': product_query,
+        'variant_state_query': state_query,
+        'variant_planning_filter': planning_filter,
+        'variant_master_sort': variant_sort,
+        'variant_master_order': variant_order,
+    }
+
 def valuation_dashboard(request):
     current_company = request.GET.get('current_company', 'IKUJI')
     if current_company not in ['IKUJI', 'SELECT']: current_company = 'IKUJI'
@@ -1023,6 +1062,22 @@ def bulk_update_product_variant_planning_flags(request):
     current_company = request.POST.get('current_company', 'IKUJI')
     if current_company not in ['IKUJI', 'SELECT']:
         current_company = 'IKUJI'
+    source = request.POST.get('source', 'valuation')
+    if source == 'product_master':
+        variant_queryset, _ = _product_master_variant_queryset(request.POST)
+        include_value = request.POST.get('bulk_action') == 'include'
+        updated_count = variant_queryset.update(include_in_planning_inventory=include_value)
+        action_label = '含める' if include_value else '除外'
+        messages.success(request, f"フィルタ結果の状態SKU {updated_count} 件を発注計画反映「{action_label}」に更新しました。")
+        redirect_url = (
+            f"/product-master/?current_company={current_company}"
+            f"&variant_product_query={request.POST.get('variant_product_query', '')}"
+            f"&variant_state_query={request.POST.get('variant_state_query', '')}"
+            f"&variant_planning_filter={request.POST.get('variant_planning_filter', '')}"
+            f"&variant_master_sort={request.POST.get('variant_master_sort', 'product_code')}"
+            f"&variant_master_order={request.POST.get('variant_master_order', 'asc')}"
+        )
+        return redirect(redirect_url)
     selected_date = parse_inventory_date(request.POST.get('inventory_date'), current_company)
     ctx = valuation_context(selected_date, current_company)
     variant_rows, _ = _filter_valuation_variant_rows(ctx['variant_summary'], request.POST)

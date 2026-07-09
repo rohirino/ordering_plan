@@ -967,6 +967,29 @@ class ImportProductsCommandTests(TestCase):
         self.assertTrue(ProductVariant.objects.get(state_code='001').include_in_planning_inventory)
         self.assertFalse(ProductVariant.objects.get(state_code='991').include_in_planning_inventory)
 
+    def test_product_master_bulk_update_planning_flag_uses_variant_filters(self):
+        product = Product.objects.create(code='6460010', name='グリップ シート', owner_company='IKUJI')
+        ProductVariant.objects.create(product=product, state_code='001', state_name='良品')
+        ProductVariant.objects.create(product=product, state_code='991', state_name='B品(箱不良)')
+
+        response = self.client.post(
+            reverse('bulk_update_product_variant_planning_flags'),
+            {
+                'source': 'product_master',
+                'current_company': 'IKUJI',
+                'variant_product_query': '6460010',
+                'variant_state_query': 'B品',
+                'variant_planning_filter': '',
+                'variant_master_sort': 'product_code',
+                'variant_master_order': 'asc',
+                'bulk_action': 'exclude',
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(ProductVariant.objects.get(state_code='001').include_in_planning_inventory)
+        self.assertFalse(ProductVariant.objects.get(state_code='991').include_in_planning_inventory)
+
     def test_valuation_upload_marks_existing_product_as_updated(self):
         Product.objects.create(code='6460010', name='旧商品名', owner_company='IKUJI')
         rows = [

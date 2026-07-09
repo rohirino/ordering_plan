@@ -72,6 +72,12 @@
         .state-list table { min-width: 520px; }
         .state-code { width: 78px; font-weight: bold; white-space: nowrap; }
         .state-name-input { width: 260px; }
+        .variant-layout { display: grid; grid-template-columns: minmax(360px, 0.7fr) minmax(620px, 1.3fr); gap: 10px; align-items: start; }
+        .variant-list { max-height: 260px; overflow: auto; border: 1px solid #c9ced6; }
+        .variant-list table { min-width: 760px; }
+        .variant-list .planning-on { color: #2b8a3e; font-weight: 900; }
+        .variant-list .planning-off { color: #c92a2a; font-weight: 900; }
+        .sub-note { font-size: 12px; line-height: 1.55; color: #495057; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px; padding: 8px; }
         .accordion-panel { padding: 0; overflow: hidden; }
         .accordion-panel > summary { cursor: pointer; list-style: none; padding: 10px; font-size: 16px; font-weight: bold; border-bottom: 1px solid #dee2e6; background: #fff; }
         .accordion-panel > summary::-webkit-details-marker { display: none; }
@@ -80,6 +86,7 @@
         .accordion-content { padding: 10px; }
         @media (max-width: 1100px) {
             .state-layout { grid-template-columns: 1fr; }
+            .variant-layout { grid-template-columns: 1fr; }
             .header { align-items: flex-start; flex-direction: column; }
         }
     </style>
@@ -250,6 +257,91 @@
                             </tr>
                             {% empty %}
                             <tr><td colspan="3" style="text-align: center; padding: 12px;">状態コードがありません。</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </details>
+
+    <details class="panel accordion-panel">
+        <summary>状態SKU 発注計画反映</summary>
+        <div class="accordion-content variant-layout">
+            <div>
+                <div class="sub-note">
+                    棚卸資産評価で作成された「商品コード + 状態コード」単位の在庫を、発注計画の現在庫へ含めるか管理します。B品・保留品・展示品など、資産計上は必要でも販売在庫にしない状態SKUは「除外」にしてください。
+                </div>
+                <form action="{% url 'bulk_update_product_variant_planning_flags' %}" method="POST" class="bulk-actions">
+                    {% csrf_token %}
+                    <input type="hidden" name="source" value="product_master">
+                    <input type="hidden" name="current_company" value="{{ current_company }}">
+                    <input type="hidden" name="variant_product_query" value="{{ variant_product_query }}">
+                    <input type="hidden" name="variant_state_query" value="{{ variant_state_query }}">
+                    <input type="hidden" name="variant_planning_filter" value="{{ variant_planning_filter }}">
+                    <input type="hidden" name="variant_master_sort" value="{{ variant_master_sort }}">
+                    <input type="hidden" name="variant_master_order" value="{{ variant_master_order }}">
+                    <button type="submit" name="bulk_action" value="include">フィルタ結果を含める</button>
+                    <button type="submit" name="bulk_action" value="exclude">フィルタ結果を除外</button>
+                </form>
+            </div>
+            <div>
+                <form method="GET" class="inline-form" style="margin-bottom: 8px;">
+                    <input type="hidden" name="current_company" value="{{ current_company }}">
+                    <input type="hidden" name="search_query" value="{{ search_query }}">
+                    <input type="hidden" name="product_prefix" value="{{ product_prefix }}">
+                    <input type="hidden" name="product_sort" value="{{ product_sort }}">
+                    <input type="hidden" name="product_order" value="{{ product_order }}">
+                    {% if show_discontinued %}<input type="hidden" name="show_discontinued" value="1">{% endif %}
+                    <input type="text" name="variant_product_query" value="{{ variant_product_query }}" placeholder="商品コード・商品名" style="width: 160px;">
+                    <input type="text" name="variant_state_query" value="{{ variant_state_query }}" placeholder="状態コード・状態名" style="width: 150px;">
+                    <select name="variant_planning_filter">
+                        <option value="" {% if not variant_planning_filter %}selected{% endif %}>反映: すべて</option>
+                        <option value="included" {% if variant_planning_filter == 'included' %}selected{% endif %}>含める</option>
+                        <option value="excluded" {% if variant_planning_filter == 'excluded' %}selected{% endif %}>除外</option>
+                    </select>
+                    <select name="variant_master_sort">
+                        <option value="product_code" {% if variant_master_sort == 'product_code' %}selected{% endif %}>商品コード順</option>
+                        <option value="product_name" {% if variant_master_sort == 'product_name' %}selected{% endif %}>商品名順</option>
+                        <option value="state_code" {% if variant_master_sort == 'state_code' %}selected{% endif %}>状態コード順</option>
+                        <option value="state_name" {% if variant_master_sort == 'state_name' %}selected{% endif %}>状態名順</option>
+                        <option value="planning" {% if variant_master_sort == 'planning' %}selected{% endif %}>反映順</option>
+                    </select>
+                    <select name="variant_master_order">
+                        <option value="asc" {% if variant_master_order == 'asc' %}selected{% endif %}>昇順</option>
+                        <option value="desc" {% if variant_master_order == 'desc' %}selected{% endif %}>降順</option>
+                    </select>
+                    <button type="submit" class="primary">表示</button>
+                    <a class="btn" href="?current_company={{ current_company }}">解除</a>
+                    <span style="font-size: 12px; color: #6c757d; font-weight: bold;">表示 {{ variant_rows|length }} / フィルタ結果 {{ variant_count }} 件</span>
+                </form>
+                <div class="variant-list">
+                    <table>
+                        <thead><tr><th>保存</th><th>商品コード</th><th>商品名</th><th>状態コード</th><th>状態名</th><th>発注計画反映</th></tr></thead>
+                        <tbody>
+                            {% for variant in variant_rows %}
+                            <tr>
+                                <td>
+                                    <form id="variantForm{{ variant.id }}" action="{% url 'update_product_variant_planning_flag' variant.id %}" method="POST">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="source" value="product_master">
+                                        <input type="hidden" name="current_company" value="{{ current_company }}">
+                                        <button type="submit" class="primary">保存</button>
+                                    </form>
+                                </td>
+                                <td class="code">{{ variant.product.code }}</td>
+                                <td>{{ variant.product.name }}</td>
+                                <td class="state-code">{{ variant.state_code }}</td>
+                                <td>{{ variant.state_name|default:"-" }}</td>
+                                <td class="check-cell">
+                                    <label class="{% if variant.include_in_planning_inventory %}planning-on{% else %}planning-off{% endif %}">
+                                        <input form="variantForm{{ variant.id }}" type="checkbox" name="include_in_planning_inventory" {% if variant.include_in_planning_inventory %}checked{% endif %}>
+                                        {% if variant.include_in_planning_inventory %}含める{% else %}除外{% endif %}
+                                    </label>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="6" style="text-align: center; padding: 12px;">状態SKUがありません。棚卸資産評価で棚卸CSVを取り込むと作成されます。</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>

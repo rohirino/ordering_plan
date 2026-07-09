@@ -643,8 +643,16 @@ def planning_dashboard(request):
 
     stock_warehouses = list(Warehouse.objects.filter(is_active=True).order_by('owner_company', 'id'))
     stock_products = Product.objects.filter(warehouseinventory__warehouse__is_active=True).distinct().order_by('code')
+    stock_code_query = (request.GET.get('stock_code') or '').strip()
+    stock_code_query = _normalize_product_code(stock_code_query) if stock_code_query else ''
+    stock_jump_found = False
     stock_paginator = Paginator(stock_products, 100)
     stock_page_number = request.GET.get('stock_page', 1)
+    if stock_code_query:
+        stock_target = stock_products.filter(code=stock_code_query).first()
+        if stock_target:
+            stock_page_number = (stock_products.filter(code__lt=stock_target.code).count() // 100) + 1
+            stock_jump_found = True
     try:
         stock_page_obj = stock_paginator.page(stock_page_number)
     except PageNotAnInteger:
@@ -671,6 +679,7 @@ def planning_dashboard(request):
             'ikuji_total': ikuji_total,
             'select_total': select_total,
             'grand_total': ikuji_total + select_total,
+            'is_jump_target': product.code == stock_code_query,
         })
     return render(request, 'inventory/dashboard.html', {
         'inventories': visible_inventories, 'page_obj': page_obj, 'date_list': date_list,
@@ -692,6 +701,8 @@ def planning_dashboard(request):
         'stock_page_obj': stock_page_obj,
         'stock_page_jump_back': max(1, stock_page_obj.number - 10),
         'stock_page_jump_forward': min(stock_page_obj.paginator.num_pages, stock_page_obj.number + 10),
+        'stock_code_query': stock_code_query,
+        'stock_jump_found': stock_jump_found,
         'import_logs': _recent_import_logs('planning'),
         **_pagination_context(request, page_obj, button_class='page-btn'),
     })
